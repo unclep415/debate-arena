@@ -139,7 +139,7 @@ export async function handleSample(body, env, fetchImpl = fetch) {
         while (!finished) {
           const { done, value } = await reader.read();
           if (done) break;
-          buf += dec.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+          buf = (buf + dec.decode(value, { stream: true })).replace(/\r\n/g, "\n"); // whole buffer: CRLF may split across chunks
           let i;
           while (!finished && (i = buf.indexOf("\n\n")) !== -1) {
             const block = buf.slice(0, i);

@@ -101,8 +101,9 @@
     return o;
   }
   // Keep the flag until a call actually reached the model (not refused by the cap or auth).
+  // Only the daily-cap HTTP 429 (err.daily) is uncounted; an upstream rate_limited line came after the count.
   function startSettled(err) {
-    if (!err || !(err.code === 'rate_limited' || err.code === 'session_expired' || err.code === 'cancelled')) hostStart = false;
+    if (!err || !((err.code === 'rate_limited' && err.daily) || err.code === 'session_expired' || err.code === 'cancelled')) hostStart = false;
   }
 
   async function getPersonas(topic, forText, againstText) {
@@ -136,6 +137,7 @@
     var code = err && err.code;
     if (code === 'rate_limited' && err.daily) return err.message;
     if (code === 'rate_limited') return 'Claude is rate limited right now. Wait a moment, then retry.';
+    if (code === 'session_expired' && globalThis.DebateHost && err.message) return err.message;
     if (code === 'session_expired') return 'Your Claude session expired. Sign in again, then retry.';
     if (code === 'refused') return 'Claude declined to write this turn. Retrying may go differently, or start a new debate with a different topic.';
     var m = err && typeof err.message === 'string' && err.message ? err.message : 'unknown error';

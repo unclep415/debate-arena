@@ -7,8 +7,15 @@ const loadSession = () => import("../worker/session.js");
 
 async function makeEnv(over = {}) {
   const { DailyCap } = await loadCap();
-  const store = new Map();
-  const cap = new DailyCap({ storage: { get: async (k) => store.get(k), put: async (k, v) => void store.set(k, v) } }, {});
+  // One DailyCap instance per DO name, like real Durable Objects.
+  const caps = new Map();
+  const capFor = (name) => {
+    if (!caps.has(name)) {
+      const store = new Map();
+      caps.set(name, new DailyCap({ storage: { get: async (k) => store.get(k), put: async (k, v) => void store.set(k, v) } }, {}));
+    }
+    return caps.get(name);
+  };
   return {
     ACCESS_PASSCODE: "open sesame", SESSION_SECRET: "s3cret", ANTHROPIC_API_KEY: "sk-ant-test", DAILY_CAP: "20",
     ASSETS: { fetch: async (req) => {
@@ -16,7 +23,7 @@ async function makeEnv(over = {}) {
       if (p === "/" || p === "/index.html") return new Response('<script src="app.js"></script>', { headers: { "content-type": "text/html" } });
       return new Response("asset " + p, { headers: { "content-type": "text/plain" } });
     } },
-    CAP: { idFromName: (n) => n, get: () => ({ fetch: (req) => cap.fetch(req) }) },
+    CAP: { idFromName: (n) => n, get: (id) => ({ fetch: (req) => capFor(id).fetch(req) }) },
     ...over,
   };
 }
@@ -187,4 +194,64 @@ test("missing secrets: fails closed", async () => {
   const r = await w.fetch(post("/api/session", { passcode: "open sesame" }), env);
   assert.ok(r.status >= 500 || r.status === 401);
   assert.strictEqual(r.headers.get("set-cookie"), null);
+});
+
+test("backstop: calls without debateStart are capped at DAILY_CAP x CALLS_PER_DEBATE per day", async () => {
+  const { default: w, CALLS_PER_DEBATE } = await loadIndex();
+  assert.strictEqual(CALLS_PER_DEBATE, 10);
+  const env = await makeEnv({ DAILY_CAP: "2" });
+  const cookie = await login(w, env);
+  const orig = globalThis.fetch;
+  let upstreamCalls = 0;
+  const up = upstream("x");
+  globalThis.fetch = async (...a) => { upstreamCalls++; return up(...a); };
+  try {
+    for (let i = 1; i <= 20; i++) {
+      const r = await w.fetch(post("/api/sample", { input: "hi" }, { cookie }), env);
+      assert.strictEqual(r.status, 200, "call " + i);
+      await r.text();
+    }
+    const r = await w.fetch(post("/api/sample", { input: "hi" }, { cookie }), env);
+    assert.strictEqual(r.status, 429);
+    const b = await r.json();
+    assert.strictEqual(b.code, "rate_limited");
+    assert.match(b.message, /Daily debate limit reached/);
+    assert.strictEqual(upstreamCalls, 20, "the blocked call never reaches the model");
+  } finally { globalThis.fetch = orig; }
+});
+
+test("backstop: a debateStart refused by the debate cap does not use call budget", async () => {
+  const { default: w } = await loadIndex();
+  const env = await makeEnv({ DAILY_CAP: "1" });
+  const cookie = await login(w, env);
+  const orig = globalThis.fetch;
+  globalThis.fetch = upstream("x");
+  try {
+    const go = async (b) => { const r = await w.fetch(post("/api/sample", b, { cookie }), env); await r.text(); return r.status; };
+    assert.strictEqual(await go({ input: "hi", debateStart: true }), 200);
+    for (let i = 0; i < 5; i++) assert.strictEqual(await go({ input: "hi", debateStart: true }), 429);
+    for (let i = 2; i <= 10; i++) assert.strictEqual(await go({ input: "hi" }), 200, "call " + i);
+    assert.strictEqual(await go({ input: "hi" }), 429);
+  } finally { globalThis.fetch = orig; }
+});
+
+test("static: HTML and JS are served with a UTF-8 charset (existing charset kept)", async () => {
+  const { default: w } = await loadIndex();
+  const types = { "/app.js": "text/javascript", "/hosted.js": "application/javascript", "/x.css": "text/css", "/y.js": "text/javascript; charset=utf-8", "/z.png": "image/png" };
+  const env = await makeEnv({ ASSETS: { fetch: async (req) => {
+    const p = new URL(req.url).pathname;
+    if (p === "/" || p === "/index.html") return new Response('<script src="app.js"></script>', { headers: { "content-type": "text/html" } });
+    return new Response("x", { headers: { "content-type": types[p] } });
+  } } });
+  for (const p of ["/", "/index.html"]) {
+    const r = await w.fetch(new Request("https://x.test" + p), env);
+    assert.strictEqual(r.headers.get("content-type"), "text/html; charset=utf-8", p);
+    assert.ok((await r.text()).includes("hosted.js"));
+  }
+  const ct = async (p) => (await w.fetch(new Request("https://x.test" + p), env)).headers.get("content-type");
+  assert.strictEqual(await ct("/app.js"), "text/javascript; charset=utf-8");
+  assert.strictEqual(await ct("/hosted.js"), "application/javascript; charset=utf-8");
+  assert.strictEqual(await ct("/x.css"), "text/css; charset=utf-8");
+  assert.strictEqual(await ct("/y.js"), "text/javascript; charset=utf-8");
+  assert.strictEqual(await ct("/z.png"), "image/png");
 });

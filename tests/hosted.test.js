@@ -42,13 +42,14 @@ async function serve(opts = {}) {
       res.on('close', () => { if (!res.writableEnded) st.aborted++; });
       if (!st.authed) { res.writeHead(401, { 'content-type': 'application/json' }); return res.end('{"code":"not_granted","message":"no"}'); }
       if (opts.cap && body.debateStart) { res.writeHead(429, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ code: 'rate_limited', message: 'Daily debate limit reached — try again tomorrow.' })); }
-      res.writeHead(200, { 'content-type': 'text/event-stream' });
-      if (body.json) {
+      if (!opts.raw) res.writeHead(200, { 'content-type': 'text/event-stream' });
+      if (body.json && !opts.raw) {
         const isJudge = /Supreme Court/.test(JSON.stringify(body.input));
         sse(res, { done: true, json: isJudge ? VERDICT : PERSONAS });
         return res.end();
       }
-      if (opts.errorAt === n) { sse(res, { delta: 'part' }); sse(res, { error: { code: 'unavailable', message: 'Down.' } }); return res.end(); }
+      if (opts.raw) return opts.raw(res, body, n);
+      if (opts.errorAt === n) { sse(res, { delta: 'part' }); sse(res, { error: { code: opts.errorCode || 'unavailable', message: 'Down.' } }); return res.end(); }
       const text = 'Turn ' + (n + 1) + ' text here';
       const mid = Math.floor(text.length / 2);
       sse(res, { delta: text.slice(0, mid) });
@@ -233,4 +234,69 @@ test('passcode screen: no horizontal scroll at 375px, dark mode tokens, textCont
 
 test('index.html never references hosted.js', () => {
   assert.doesNotMatch(fs.readFileSync(path.join(SRC, 'index.html'), 'utf8'), /hosted\.js/);
+});
+
+test('upstream rate_limited SSE line after the count: retry does not count the debate again', async () => {
+  const st = await open({ authed: true, errorAt: 0, errorCode: 'rate_limited' });
+  const { page } = st;
+  await startDebate(page, true);
+  await page.waitForSelector('.cutoff');
+  assert.match(await page.textContent('body'), /rate limited right now/);
+  await page.getByRole('button', { name: /Retry this turn/ }).click();
+  await page.waitForFunction(() => document.querySelectorAll('.bubble').length === 6 && !document.querySelector('#stop:not([hidden])'), null, { timeout: 15000 });
+  assert.deepEqual(st.sampleBodies.map((b) => !!b.debateStart), [true, false, false, false, false, false, false, false]);
+  await st.close();
+});
+
+test('401 mid-session: retry copy says you are signed in again (not the claude.ai copy)', async () => {
+  const st = await open({ authed: true });
+  const { page } = st;
+  st.authed = false;
+  await startDebate(page, true);
+  await page.waitForSelector('#passcodeScreen:not([hidden])');
+  await page.fill('#passcodeScreen input', 'open-sesame');
+  await page.press('#passcodeScreen input', 'Enter');
+  await page.waitForSelector('.cutoff');
+  assert.match(await page.textContent('.notice'), /signed in again/);
+  assert.doesNotMatch(await page.textContent('.notice'), /Your Claude session/);
+  await st.close();
+});
+
+// Drives DebateHost's sample() directly against a raw SSE body written in the given chunks.
+async function rawCall(chunks, json) {
+  const st = await open({ authed: true, raw: async (res) => {
+    res.writeHead(200, { 'content-type': 'text/event-stream' });
+    for (const c of chunks) { res.write(c); await sleep(40); }
+    res.end();
+  } });
+  const out = await st.page.evaluate(async (json) => {
+    const s = await globalThis.DebateHost.sample();
+    const seen = [];
+    try {
+      const r = json ? await s.json('p') : await s([{ role: 'user', content: 'x' }], { onText: (u) => seen.push(u.text) });
+      return { ok: r, seen };
+    } catch (e) { return { err: e, seen }; }
+  }, !!json);
+  await st.close();
+  return out;
+}
+
+test('SSE parser: CRLF with the blank line split across chunks', async () => {
+  const d = (o) => 'data: ' + JSON.stringify(o) + '\r\n';
+  const out = await rawCall([d({ delta: 'Hel' }) + '\r', '\n' + d({ delta: 'lo' }) + '\r', '\n' + d({ done: true, text: 'Hello' }) + '\r', '\n']);
+  assert.deepEqual(out.ok, { text: 'Hello', truncated: false });
+  assert.deepEqual(out.seen, ['Hel', 'Hello']);
+});
+
+test('SSE parser: events split mid-JSON and several per chunk; onText gets the whole text', async () => {
+  const all = 'data: {"delta":"A"}\n\ndata: {"delta":"B"}\n\ndata: {"del' + 'ta":"C"}\n\ndata: {"done":true,"text":"ABC"}\n\n';
+  const out = await rawCall([all.slice(0, 45), all.slice(45, 50), all.slice(50)]);
+  assert.deepEqual(out.ok, { text: 'ABC', truncated: false });
+  assert.deepEqual(out.seen, ['A', 'AB', 'ABC']);
+});
+
+test('SSE parser: stream ending without done rejects unavailable with partial text', async () => {
+  const out = await rawCall(['data: {"delta":"half"}\n\n']);
+  assert.equal(out.err.code, 'unavailable');
+  assert.equal(out.err.text, 'half');
 });

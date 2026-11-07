@@ -8,6 +8,16 @@ export { DailyCap } from "./cap.js";
 
 const limiter = createLimiter();
 const CAP_MESSAGE = "Daily debate limit reached — try again tomorrow.";
+// Server-side backstop: debateStart is client-controlled, so every /api/sample call also counts
+// against a coarse per-day call budget (a debate is ~8 calls; the rest leaves room for retries).
+export const CALLS_PER_DEBATE = 10;
+const TEXT_TYPES = /^(text\/html|text\/css|text\/javascript|application\/javascript)\b/i;
+
+// Static text assets must declare UTF-8 (index.html has no <meta charset>; the JS has emoji).
+function withCharset(headers) {
+  const t = headers.get("content-type");
+  if (t && TEXT_TYPES.test(t) && !/charset=/i.test(t)) headers.set("content-type", t + "; charset=utf-8");
+}
 
 function secure(res, isApi) {
   const headers = new Headers(res.headers);
@@ -15,6 +25,7 @@ function secure(res, isApi) {
   headers.set("referrer-policy", "no-referrer");
   headers.set("x-frame-options", "DENY");
   if (isApi) headers.set("cache-control", "no-store");
+  else withCharset(headers);
   return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
 
@@ -42,9 +53,9 @@ async function postSession(request, env) {
   return res;
 }
 
-async function takeDebateSlot(env) {
-  const stub = env.CAP.get(env.CAP.idFromName("global"));
-  const url = `https://cap/hit?limit=${parseLimit(env.DAILY_CAP)}&date=${utcDate(new Date())}`;
+async function takeSlot(env, name, limit) {
+  const stub = env.CAP.get(env.CAP.idFromName(name));
+  const url = `https://cap/hit?limit=${limit}&date=${utcDate(new Date())}`;
   const res = await stub.fetch(new Request(url, { method: "POST" }));
   return (await res.json()).allowed === true;
 }
@@ -55,11 +66,11 @@ async function postSample(request, env) {
   if (!body || typeof body !== "object") return jsonError(400, "invalid_request", "Invalid JSON body.");
   const v = validateInput(body.input);
   if (!v.ok) return jsonError(400, "invalid_request", v.message);
-  if (body.debateStart === true) {
-    let allowed;
-    try { allowed = await takeDebateSlot(env); } catch { return jsonError(503, "unavailable", "Usage counter unavailable. Please try again."); }
-    if (!allowed) return jsonError(429, "rate_limited", CAP_MESSAGE);
-  }
+  const limit = parseLimit(env.DAILY_CAP);
+  try {
+    if (body.debateStart === true && !(await takeSlot(env, "global", limit))) return jsonError(429, "rate_limited", CAP_MESSAGE);
+    if (!(await takeSlot(env, "global-calls", limit * CALLS_PER_DEBATE))) return jsonError(429, "rate_limited", CAP_MESSAGE);
+  } catch { return jsonError(503, "unavailable", "Usage counter unavailable. Please try again."); }
   return handleSample(body, env);
 }
 

@@ -140,7 +140,8 @@
       while (!result && !failure) {
         var r = await reader.read();
         if (r.done) break;
-        buf += dec.decode(r.value, { stream: true }).replace(/\r\n/g, '\n');
+        // Normalize on the whole buffer so a CRLF split across chunks is still joined.
+        buf = (buf + dec.decode(r.value, { stream: true })).replace(/\r\n/g, '\n');
         var i;
         while (!result && !failure && (i = buf.indexOf('\n\n')) !== -1) {
           var blk = buf.slice(0, i); buf = buf.slice(i + 2); handle(blk);

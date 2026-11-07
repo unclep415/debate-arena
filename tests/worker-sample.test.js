@@ -161,3 +161,14 @@ test("handleSample: stop_reason refusal -> error, partial text discarded (text a
   const out = await lines(await handleSample({ input: "hi" }, { ANTHROPIC_API_KEY: "k" }, async () => okRes));
   assert.deepStrictEqual(out[out.length - 1], { done: true, text: "fine" });
 });
+
+test("handleSample: CRLF upstream with a \\r\\n split across chunks is parsed", async () => {
+  const { handleSample } = await load();
+  const enc = new TextEncoder();
+  const d = (o) => `event: x\r\ndata: ${JSON.stringify(o)}\r\n`;
+  // Each event's blank line is split between "\r" and "\n" across chunks.
+  const chunks = [d(delta("Hel")[1]) + "\r", "\n" + d(delta("lo")[1]) + "\r", "\n" + d({ type: "message_stop" }) + "\r", "\n"];
+  const up = async () => new Response(new ReadableStream({ start(c) { for (const ch of chunks) c.enqueue(enc.encode(ch)); c.close(); } }), { status: 200 });
+  const out = await lines(await handleSample({ input: "hi" }, { ANTHROPIC_API_KEY: "k" }, up));
+  assert.deepStrictEqual(out, [{ delta: "Hel" }, { delta: "lo" }, { done: true, text: "Hello" }]);
+});
