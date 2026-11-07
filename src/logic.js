@@ -45,7 +45,12 @@
   function cleanInput(str, max) {
     if (str === null || str === undefined) return '';
     var s = String(str).replace(/\s+/g, ' ').trim();
-    if (typeof max === 'number' && max >= 0 && s.length > max) s = s.slice(0, max).trim();
+    if (typeof max === 'number' && max >= 0 && s.length > max) {
+      s = s.slice(0, max);
+      // don't leave half of a surrogate pair (e.g. an emoji) at the cut
+      if (/[\uD800-\uDBFF]$/.test(s)) s = s.slice(0, -1);
+      s = s.trim();
+    }
     return s;
   }
 
@@ -82,16 +87,24 @@
     return lines.join('\n');
   }
 
+  var EMOJI_RE = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u20E3]/u;
+
+  // First grapheme that is actually an emoji (handles ZWJ sequences, flags,
+  // skin tones, keycaps); '' if the string has none (e.g. "smile").
   function firstGrapheme(s) {
     if (typeof s !== 'string') return '';
     s = s.trim();
     if (!s) return '';
+    var parts;
     if (typeof Intl !== 'undefined' && Intl.Segmenter) {
-      var it = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s)[Symbol.iterator]();
-      var n = it.next();
-      return n.done ? '' : n.value.segment;
+      parts = Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s), function (x) { return x.segment; });
+    } else {
+      parts = Array.from(s);
     }
-    return Array.from(s)[0] || '';
+    for (var i = 0; i < parts.length; i++) {
+      if (EMOJI_RE.test(parts[i])) return parts[i];
+    }
+    return '';
   }
 
   function normalizePersonas(raw, forText, againstText) {
@@ -141,7 +154,8 @@
     var p = persona || {};
     var lines = [];
     lines.push('You are ' + (p.name || DEFAULTS[side === 'against' ? 'against' : 'for'].name) +
-      ', a character in a lighthearted debate. Your personality: ' + (p.personality || 'a spirited debater') + '.');
+      ', a character in a lighthearted debate. Your personality: ' +
+      String(p.personality || 'a spirited debater').replace(/[.!?\s]+$/, '') + '.');
     lines.push('The debate topic is: "' + topic + '"');
     lines.push('You are arguing ' + stance + ' the topic.');
     lines.push('This is the ' + rname + ' round. ' + (ROUND_GOALS[rname] || ''));
@@ -153,7 +167,8 @@
     lines.push('');
     lines.push(t ? 'Debate so far:\n\n' + t : 'The debate so far: nothing yet, you speak first.');
     lines.push('');
-    lines.push('Now give your ' + rname + ' speech.');
+    lines.push('Now give your ' + rname + ' speech as ' + (p.name || DEFAULTS[side === 'against' ? 'against' : 'for'].name) +
+      ', arguing ' + stance + ' the topic: in character, at most ~120 words, plain prose with no headings or bullet lists.');
     return [{ role: 'user', content: lines.join('\n') }];
   }
 
@@ -195,7 +210,7 @@
       scores[sides[i]] = { logic: l, persuasion: p, character: c };
       totals[sides[i]] = l + p + c;
     }
-    var winner = raw.winner;
+    var winner = typeof raw.winner === 'string' ? raw.winner.trim().toLowerCase() : raw.winner;
     if (winner !== 'for' && winner !== 'against' && winner !== 'tie') {
       winner = totals.for > totals.against ? 'for' : totals.against > totals.for ? 'against' : 'tie';
     }

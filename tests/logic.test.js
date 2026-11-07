@@ -194,3 +194,35 @@ test('normalizeVerdict garbage -> null', () => {
     { scores: { for: { logic: null, persuasion: 1, character: 1 }, against: { logic: 1, persuasion: 1, character: 1 } } },
   ]) assert.strictEqual(L.normalizeVerdict(raw), null);
 });
+
+test('review fix: cleanInput never leaves a lone surrogate at the cut', () => {
+  const s = L.cleanInput('a'.repeat(199) + '😀tail', 200);
+  assert.strictEqual(s, 'a'.repeat(199));
+  assert.ok(!/[\uD800-\uDBFF]$/.test(s));
+});
+
+test('review fix: emoji must be an emoji; ZWJ, flags, skin tone, keycap kept whole', () => {
+  const e = (x) => L.normalizePersonas({ for: { name: 'n', emoji: x } }, '', '').for.emoji;
+  assert.strictEqual(e('👩‍⚖️'), '👩‍⚖️');
+  assert.strictEqual(e('🇫🇷'), '🇫🇷');
+  assert.strictEqual(e('👍🏽'), '👍🏽');
+  assert.strictEqual(e('1️⃣'), '1️⃣');
+  assert.strictEqual(e('Lawyer 👩‍⚖️'), '👩‍⚖️');
+  assert.strictEqual(e('smile'), '🟦');
+});
+
+test('review fix: winner is case/space-insensitive', () => {
+  const sc = { logic: 1, persuasion: 1, character: 1 };
+  const v = L.normalizeVerdict({ scores: { for: sc, against: { logic: 9, persuasion: 9, character: 9 } }, winner: ' For ' });
+  assert.strictEqual(v.winner, 'for');
+});
+
+test('review fix: turn prompt has no double period and ends with a constraint reminder', () => {
+  const m = L.buildTurnPrompt({ name: 'Bob', personality: 'grumpy.' }, 'against', 'Closing', 't', []);
+  const c = m[m.length - 1].content;
+  assert.ok(!c.includes('grumpy..'));
+  const last = c.trim().split('\n').pop();
+  assert.match(last, /Bob/);
+  assert.match(last, /AGAINST/);
+  assert.match(last, /120 words/);
+});
