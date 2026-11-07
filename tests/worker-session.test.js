@@ -55,3 +55,16 @@ test("limiter: 5 wrong tries then blocked; window expires; success clears", asyn
   l.clear("3.3.3.3");
   assert.strictEqual(l.isBlocked("3.3.3.3", t0), false);
 });
+
+test("createLimiter: memory stays bounded (sweeps expired, caps tracked IPs and timestamps)", async () => {
+  const { createLimiter } = await load();
+  const l = createLimiter({ maxIps: 100 });
+  for (let i = 0; i < 1000; i++) l.fail("10.0." + i, 1000);
+  assert.ok(l.size() <= 100, "capped at maxIps, got " + l.size());
+  // Later, after the window, a new IP sweeps all expired entries.
+  const later = 1000 + 10 * 60 * 1000 + 1;
+  l.fail("9.9.9.9", later);
+  assert.strictEqual(l.size(), 1);
+  for (let i = 0; i < 50; i++) l.fail("8.8.8.8", later);
+  assert.strictEqual(l.isBlocked("8.8.8.8", later), true, "still blocks after many failures");
+});

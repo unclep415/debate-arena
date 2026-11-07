@@ -4,6 +4,8 @@ export const MAX_TOKENS = 1024;
 export const MAX_INPUT_CHARS = 40000;
 const API_URL = "https://api.anthropic.com/v1/messages";
 const API_VERSION = "2026-10-21";
+// Server-side refusal fallback ("default" routing by refusal category; Claude API only).
+const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 const JSON_SYSTEM = "Respond with a single valid JSON value only. No markdown fences, no commentary before or after.";
 
 const MESSAGES = {
@@ -11,9 +13,12 @@ const MESSAGES = {
   not_granted: "The server is not authorized to reach the AI service.",
   invalid_request: "The request was not accepted.",
   invalid_json: "The model did not return valid JSON.",
+  refused: "The AI declined to answer this request.",
   unavailable: "The AI service is temporarily unavailable. Please try again.",
 };
 const err = (code) => ({ error: { code, message: MESSAGES[code] } });
+// A refusal (stop_reason "refusal") is surfaced with the spec's invalid_request code.
+const refusedErr = () => ({ error: { code: "invalid_request", message: MESSAGES.refused } });
 
 export function validateInput(input) {
   const bad = { ok: false, message: "Invalid input." };
@@ -49,15 +54,21 @@ function mapStatus(status) {
 }
 
 export function buildUpstreamRequest(apiKey, messages, json) {
-  // thinking off (between_tools): short debate turns must not spend max_tokens on reasoning.
-  // No sampling params: non-default values are rejected by current models.
-  const body = { model: MODEL, max_tokens: MAX_TOKENS, stream: true, messages, thinking: { type: "between_tools" } };
+  // between_tools = lowest thinking setting on claude-sonnet-5-5 (no extended thinking), so the
+  // 1024 max_tokens go to the reply. It is accepted only at effort high or below and takes no
+  // other field, so effort is pinned explicitly. No sampling params: API version 2026-10-21
+  // rejects temperature/top_p/top_k at any value. fallbacks "default" retries cyber/frontier_llm
+  // refusals server-side (a between_tools request falls back with thinking disabled).
+  const body = {
+    model: MODEL, max_tokens: MAX_TOKENS, stream: true, messages,
+    thinking: { type: "between_tools" }, output_config: { effort: "high" }, fallbacks: "default",
+  };
   if (json) body.system = JSON_SYSTEM;
   return {
     url: API_URL,
     init: {
       method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": API_VERSION },
+      headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": API_VERSION, "anthropic-beta": FALLBACK_BETA },
       body: JSON.stringify(body),
     },
   };
@@ -95,7 +106,7 @@ export async function handleSample(body, env, fetchImpl = fetch) {
 
   const reader = upstream.body.getReader();
   const dec = new TextDecoder();
-  let buf = "", text = "", finished = false;
+  let buf = "", text = "", finished = false, stopReason = null;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -110,11 +121,15 @@ export async function handleSample(body, env, fetchImpl = fetch) {
         if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta" && ev.delta.text) {
           text += ev.delta.text;
           send({ delta: ev.delta.text });
+        } else if (ev.type === "message_delta" && ev.delta && ev.delta.stop_reason) {
+          stopReason = ev.delta.stop_reason;
         } else if (ev.type === "error") {
           fail(mapErrorType(ev.error && ev.error.type));
         } else if (ev.type === "message_stop") {
           finished = true;
-          if (wantJson) {
+          // Whole chain declined (after any server-side fallback): discard partial output.
+          if (stopReason === "refusal") send(refusedErr());
+          else if (wantJson) {
             const p = parseJsonText(text);
             send(p.ok ? { done: true, json: p.value } : err("invalid_json"));
           } else send({ done: true, text });

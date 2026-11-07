@@ -126,3 +126,38 @@ test("mapUpstreamErrorType", async () => {
   assert.strictEqual(mapErrorType("overloaded_error"), "unavailable");
   assert.strictEqual(mapErrorType("api_error"), "unavailable");
 });
+
+test("buildUpstreamRequest: between_tools at explicit effort<=high, server-side fallback default + beta", async () => {
+  const { buildUpstreamRequest } = await load();
+  const r = buildUpstreamRequest("K", [{ role: "user", content: "x" }], false);
+  const b = JSON.parse(r.init.body);
+  assert.deepStrictEqual(b.thinking, { type: "between_tools" }, "no other field allowed with between_tools");
+  assert.ok(["low", "medium", "high"].includes(b.output_config.effort));
+  assert.strictEqual(b.fallbacks, "default");
+  assert.strictEqual(r.init.headers["anthropic-beta"], "server-side-fallback-2026-07-01");
+  assert.strictEqual(r.init.headers["anthropic-version"], "2026-10-21");
+  for (const k of ["temperature", "top_p", "top_k"]) assert.strictEqual(k in b, false);
+});
+
+test("handleSample: stop_reason refusal -> error, partial text discarded (text and json mode)", async () => {
+  const { handleSample } = await load();
+  const refused = () => sse([
+    ["message_start", { type: "message_start" }], delta("partial"),
+    ["message_delta", { type: "message_delta", delta: { stop_reason: "refusal" }, usage: { output_tokens: 1 } }],
+    ["message_stop", { type: "message_stop" }],
+  ]);
+  for (const json of [false, true]) {
+    const out = await lines(await handleSample({ input: "hi", json }, { ANTHROPIC_API_KEY: "k" }, async () => refused()));
+    const last = out[out.length - 1];
+    assert.strictEqual(last.error.code, "invalid_request");
+    assert.ok(!out.some((o) => o.done), "no done event on refusal");
+  }
+  // end_turn still completes normally
+  const okRes = sse([
+    ["message_start", { type: "message_start" }], delta("fine"),
+    ["message_delta", { type: "message_delta", delta: { stop_reason: "end_turn" } }],
+    ["message_stop", { type: "message_stop" }],
+  ]);
+  const out = await lines(await handleSample({ input: "hi" }, { ANTHROPIC_API_KEY: "k" }, async () => okRes));
+  assert.deepStrictEqual(out[out.length - 1], { done: true, text: "fine" });
+});

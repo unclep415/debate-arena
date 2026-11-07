@@ -66,16 +66,28 @@ export function readCookie(header, name) {
 }
 
 // In-memory per-isolate brake: 5 failures per IP in 10 minutes. Best effort, not a global lock.
-export function createLimiter({ max = 5, windowMs = 10 * 60 * 1000 } = {}) {
+// Memory is bounded: expired entries are swept and at most maxIps addresses are tracked
+// (oldest-inserted evicted first), each holding at most `max` timestamps.
+export function createLimiter({ max = 5, windowMs = 10 * 60 * 1000, maxIps = 10000 } = {}) {
   const fails = new Map();
   const recent = (ip, now) => {
     const list = (fails.get(ip) || []).filter((t) => now - t < windowMs);
     if (list.length) fails.set(ip, list); else fails.delete(ip);
     return list;
   };
+  const sweep = (now) => {
+    for (const [ip, list] of fails) if (!list.some((t) => now - t < windowMs)) fails.delete(ip);
+    while (fails.size >= maxIps) fails.delete(fails.keys().next().value);
+  };
   return {
     isBlocked: (ip, now = Date.now()) => recent(ip, now).length >= max,
-    fail(ip, now = Date.now()) { const l = recent(ip, now); l.push(now); fails.set(ip, l); },
+    fail(ip, now = Date.now()) {
+      const l = recent(ip, now);
+      if (!fails.has(ip) && fails.size >= maxIps) sweep(now);
+      l.push(now);
+      fails.set(ip, l.slice(-max));
+    },
     clear: (ip) => void fails.delete(ip),
+    size: () => fails.size,
   };
 }
