@@ -32,6 +32,7 @@
     --on-accent: #10101a; --danger: #ff8a80; color-scheme: dark;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body {
     background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 16px; line-height: 1.5;
     margin: 0;
@@ -41,7 +42,7 @@
   }
   main { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
   header { display: flex; flex-direction: column; gap: 4px; }
-  .versus { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-size: clamp(1.9rem, 8vw, 3rem); line-height: 1; letter-spacing: .01em; }
+  .versus { margin: 0; font-weight: 400; display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-size: clamp(1.9rem, 8vw, 3rem); line-height: 1; letter-spacing: .01em; }
   .versus .f { color: var(--for); } .versus .a { color: var(--against); }
   .versus .vs { font-size: .45em; color: var(--muted); border: 2px solid var(--line); border-radius: 999px; padding: .25em .6em; }
   .tagline { margin: 0; color: var(--muted); }
@@ -91,7 +92,7 @@
 
 <main>
   <header>
-    <div class="versus" aria-label="Debate Arena"><span class="f">DEBATE</span><span class="vs">VS</span><span class="a">ARENA</span></div>
+    <h1 class="versus" aria-label="Debate Arena"><span class="f">DEBATE</span><span class="vs">VS</span><span class="a">ARENA</span></h1>
     <p class="tagline">Pick a topic, cast two debaters, and watch three rounds unfold.</p>
   </header>
 

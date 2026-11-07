@@ -80,6 +80,8 @@
   async function runDebate() {
     var myRun;
     var isAbort = function () { return aborted(myRun); };
+    // A superseded run (Stop -> New debate -> Start before its call settled) must not touch the UI.
+    var stopOrStale = function () { return myRun === runId ? endDebate('Debate stopped.') : undefined; };
     var topic = L.cleanInput(els.topic.value, 200);
     var forText = L.cleanInput(els.forP.value, 300);
     var againstText = L.cleanInput(els.againstP.value, 300);
@@ -89,6 +91,7 @@
     setInputsDisabled(true);
     els.transcript.textContent = '';
     els.topicBanner.textContent = topic;
+    els.banner.hidden = true;
     els.setup.hidden = true;
     els.arena.hidden = false;
     els.newDebate.hidden = true;
@@ -99,14 +102,14 @@
       setStatus('Casting the debaters…');
       personas = await getPersonas(topic, forText, againstText);
     } catch (err) {
-      if (isAbort()) return endDebate('Debate stopped.');
+      if (isAbort()) return stopOrStale();
       // Persona-failure recovery UI belongs to a later task; return to setup with inputs kept.
       showBanner('Could not set up the debaters: ' + ((err && err.message) || 'unknown error'));
       running = false; els.arena.hidden = true; els.setup.hidden = false;
       setInputsDisabled(false); refreshStart();
       return;
     }
-    if (isAbort()) return endDebate('Debate stopped.');
+    if (isAbort()) return stopOrStale();
 
     var transcript = [];
     for (var i = 0; i < L.TURNS.length; i++) {
@@ -126,14 +129,14 @@
         text = (res && typeof res.text === 'string') ? res.text : bubble.text.textContent;
       } catch (err) {
         bubble.text.classList.remove('cursor');
-        if (isAbort()) return endDebate('Debate stopped.');
+        if (isAbort()) return stopOrStale();
         // Retry UI is a later task; for now end the debate and show the error.
         return endDebate('Something went wrong: ' + ((err && err.message) || 'unknown error'));
       }
       bubble.text.textContent = text;
       bubble.text.classList.remove('cursor');
       transcript.push({ side: turn.side, round: turn.round, name: persona.name, text: text });
-      if (isAbort()) return endDebate('Debate stopped.');
+      if (isAbort()) return stopOrStale();
     }
     endDebate('The debate is over.');
   }

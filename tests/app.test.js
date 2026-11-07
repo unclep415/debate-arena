@@ -24,12 +24,16 @@ async function open(cfg = {}, viewport) {
       window.__calls.push({ kind: 'sample', input });
       const text = cfg.textFor ? new Function('i', 'return (' + cfg.textFor + ')(i)')(idx) : 'Turn ' + (idx + 1) + ' text';
       const half = Math.ceil(text.length / 2);
-      const abortErr = () => Object.assign(new Error('aborted'), { name: 'AbortError' });
+      // Real API: every failure is a rejected plain {code, message, text?}; abort is code 'cancelled'.
+      const abortErr = () => ({ code: 'cancelled', message: 'The call was cancelled.', text: text.slice(0, half) });
       if (opts.signal && opts.signal.aborted) throw abortErr();
       await sleep(cfg.delay || 10);
       if (opts.onText) opts.onText({ text: text.slice(0, half), delta: text.slice(0, half) });
       if (cfg.hangAt === idx) {
-        await new Promise((_, rej) => opts.signal && opts.signal.addEventListener('abort', () => rej(abortErr())));
+        await new Promise((_, rej) => {
+          const fire = () => setTimeout(() => rej(abortErr()), cfg.abortDelay || 0);
+          if (opts.signal && opts.signal.aborted) fire(); else if (opts.signal) opts.signal.addEventListener('abort', fire);
+        });
       }
       await sleep(cfg.delay || 10);
       if (opts.signal && opts.signal.aborted) throw abortErr();
@@ -37,8 +41,13 @@ async function open(cfg = {}, viewport) {
       return { text, truncated: false };
     };
     sample.json = async (input, opts = {}) => {
+      const jidx = window.__calls.filter((c) => c.kind === 'json').length;
       window.__calls.push({ kind: 'json', input });
+      if (cfg.jsonHang) {
+        await new Promise((_, rej) => opts.signal && opts.signal.addEventListener('abort', () => rej({ code: 'cancelled', message: 'cancelled' })));
+      }
       await sleep(cfg.delay || 10);
+      if (cfg.jsonFailFirst && jidx === 0) throw { code: 'invalid_json', message: 'Bad JSON', text: 'nope' };
       return {
         for: { name: 'Gen For', emoji: '🦊', personality: 'sly' },
         against: { name: 'Gen Against', emoji: '🐢', personality: 'slow' },
@@ -205,5 +214,74 @@ test('no horizontal scroll at 375px, even with a long unbroken word', async () =
   await page.waitForFunction(() => document.querySelectorAll('.bubble').length === 6);
   const w = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
   assert.ok(w[0] <= w[1], JSON.stringify(w));
+  await ctx.close();
+});
+
+test('stale run settling after Stop -> New debate -> Start does not clobber the new run', async () => {
+  const { page, ctx, errors } = await open({ hangAt: 1, abortDelay: 400, delay: 60 });
+  await fillAndStart(page, { topic: 'Race' });
+  await page.waitForFunction(() => { const t = document.querySelectorAll('.bubble .text')[1]; return t && t.textContent.length > 0; });
+  await page.click('#stop');
+  await page.click('#newDebate');
+  await page.click('#start');
+  await page.waitForTimeout(600); // old run's cancelled rejection has now arrived
+  assert.equal(await page.isVisible('#stop'), true);
+  assert.equal(await page.isHidden('#newDebate'), true);
+  assert.doesNotMatch(await page.textContent('#status'), /stopped/i);
+  // Stop still aborts the new run's in-flight call (its controller wasn't nulled by the stale run).
+  await page.click('#stop');
+  await page.waitForTimeout(300);
+  const n = await calls(page, 'sample');
+  await page.waitForTimeout(300);
+  assert.equal(await calls(page, 'sample'), n);
+  assert.match(await page.textContent('#status'), /stopped/i);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('stop during persona call ends the debate with no turn calls', async () => {
+  const { page, ctx, errors } = await open({ jsonHang: true });
+  await fillAndStart(page, { f: '' });
+  await page.waitForFunction(() => window.__calls.length === 1);
+  await page.click('#stop');
+  await page.waitForSelector('#newDebate:not([hidden])');
+  await page.waitForTimeout(150);
+  assert.equal(await calls(page, 'sample'), 0);
+  assert.match(await page.textContent('#status'), /stopped/i);
+  assert.equal(await page.isHidden('#banner'), true);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('persona failure banner returns to setup and clears on the next Start', async () => {
+  const { page, ctx } = await open({ jsonFailFirst: true });
+  await fillAndStart(page, { f: '' });
+  await page.waitForSelector('#banner:not([hidden])');
+  assert.equal(await page.isVisible('#setup'), true);
+  assert.equal(await page.inputValue('#againstPersona'), 'A poet');
+  await page.click('#start');
+  await page.waitForSelector('.bubble');
+  assert.equal(await page.isHidden('#banner'), true);
+  await ctx.close();
+});
+
+test('page has a level-1 heading', async () => {
+  const { page, ctx } = await open();
+  assert.equal(await page.$$eval('h1', (h) => h.length), 1);
+  await ctx.close();
+});
+
+test('hidden attribute really hides setup/arena (CSS display must not override it)', async () => {
+  const { page, ctx } = await open();
+  assert.equal(await page.isVisible('#arena'), false);
+  assert.equal(await page.isVisible('#topicBanner'), false);
+  await fillAndStart(page);
+  await page.waitForSelector('.bubble');
+  assert.equal(await page.isVisible('#setup'), false);
+  assert.equal(await page.isVisible('#start'), false);
+  await page.waitForSelector('#newDebate:not([hidden])');
+  await page.click('#newDebate');
+  assert.equal(await page.isVisible('#setup'), true);
+  assert.equal(await page.isVisible('#arena'), false);
   await ctx.close();
 });
