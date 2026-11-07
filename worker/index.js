@@ -9,6 +9,8 @@ export { DailyCap } from "./cap.js";
 
 const limiter = createLimiter();
 const CAP_MESSAGE = "Daily debate limit reached — try again tomorrow.";
+// Our own per-day /api/tts backstop (not ElevenLabs credits, which answer reason "quota").
+const TTS_CAP_MESSAGE = "Daily premium-voice limit reached — try again tomorrow.";
 // Server-side backstop: debateStart is client-controlled, so every /api/sample call also counts
 // against a coarse per-day call budget (a debate is ~8 calls; the rest leaves room for retries).
 export const CALLS_PER_DEBATE = 10;
@@ -80,7 +82,7 @@ async function postSample(request, env) {
 async function postTts(request, env) {
   if (request.method !== "POST") return jsonError(405, "invalid_request", "Method not allowed.");
   try {
-    if (!(await takeSlot(env, "global-tts", parseLimit(env.DAILY_CAP) * TTS_PER_DEBATE))) return jsonError(429, "rate_limited", "Premium voices are out of credits for today.");
+    if (!(await takeSlot(env, "global-tts", parseLimit(env.DAILY_CAP) * TTS_PER_DEBATE))) return Response.json({ code: "rate_limited", reason: "daily", message: TTS_CAP_MESSAGE }, { status: 429 });
   } catch { return jsonError(503, "unavailable", "Usage counter unavailable. Please try again."); }
   return handleTts(request, env);
 }

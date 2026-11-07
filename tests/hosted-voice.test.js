@@ -38,7 +38,9 @@ async function serve(opts = {}) {
     if (url === '/api/tts') {
       st.ttsBodies.push(JSON.parse(await body()));
       if (opts.tts === 500) return json(502, { code: 'unavailable', message: 'down' });
-      if (opts.tts === 'quota') return json(429, { code: 'rate_limited', message: 'Premium voices are out of credits right now.' });
+      if (opts.tts === 'quota') return json(429, { code: 'rate_limited', reason: 'quota', message: 'Premium voices are out of credits right now.' });
+      if (opts.tts === 'daily') return json(429, { code: 'rate_limited', reason: 'daily', message: 'Daily premium-voice limit reached — try again tomorrow.' });
+      if (opts.tts === 'busy') return json(503, { code: 'unavailable', message: 'The voice service is unavailable.' });
       if (opts.tts === 'novoice') return json(502, { code: 'voice_not_found', message: 'gone' });
       if (opts.tts === 'unauth') return json(401, { code: 'not_granted', message: 'x' });
       const data = wav(opts.clipMs || 150);
@@ -138,16 +140,47 @@ test('voice on: persona prompt lists voices; 7 clips in order with each persona\
   await st.close();
 });
 
-test('user-written personas still get distinct voices (defaults), no extra model call', async () => {
+test('user-written personas (voice on): Claude still casts fitting voices; typed text stays the personality; debateStart on that call', async () => {
   const st = await open();
   const { page } = st;
   await page.click('#voiceSetup');
   await start(page, true);
   await over(page);
   const v = st.ttsBodies.map((b) => b.voice);
-  assert.deepEqual(v.slice(0, 2), ['callum', 'lily']);
-  assert.equal(v[6], 'judge');
+  assert.deepEqual(v, ['harry', 'lily', 'harry', 'lily', 'harry', 'lily', 'judge']);
+  const p = st.sampleBodies[0];
+  assert.equal(p.json, true);
+  assert.match(p.input, /FOR character \(given by the user\): A pirate/);
+  assert.match(p.input, /AGAINST character \(given by the user\): A poet/);
+  assert.match(p.input, /- callum: husky trickster/);
+  assert.deepEqual(st.sampleBodies.map((b) => !!b.debateStart), [true, false, false, false, false, false, false, false]);
+  assert.equal(st.sampleBodies.filter((b) => b.json).length, 2, 'persona call + judge call');
+  assert.equal(await page.textContent('.bubble[data-side="for"] .name'), 'Gen For');
+  assert.deepEqual(st.errors, []);
+  await st.close();
+});
+
+test('user-written personas (voice off): no persona call; first turn carries debateStart', async () => {
+  const st = await open();
+  const { page } = st;
+  await start(page, true);
+  await over(page);
   assert.equal(st.sampleBodies.filter((b) => b.json).length, 1, 'only the judge call');
+  assert.equal(st.sampleBodies[0].json, undefined);
+  assert.deepEqual(st.sampleBodies.map((b) => !!b.debateStart), [true, false, false, false, false, false, false]);
+  assert.equal(await page.textContent('.bubble[data-side="for"] .name'), 'Pirate');
+  await st.close();
+});
+
+test('TTS transient 503 (upstream 429 busy): falls back per turn only, ElevenLabs retried every turn', async () => {
+  const st = await open({ tts: 'busy' });
+  const { page } = st;
+  await page.click('#voiceSetup');
+  await start(page);
+  await over(page);
+  assert.equal(st.ttsBodies.length, 7);
+  assert.equal((await utts(page)).length, 7);
+  assert.equal(await page.evaluate(() => globalThis.DebateHost.ttsEnabled()), true);
   await st.close();
 });
 
@@ -204,7 +237,7 @@ test('TTS 500: that turn falls back to browser speech, every turn still tries El
   await st.close();
 });
 
-for (const mode of ['quota', 'novoice']) {
+for (const mode of ['quota', 'daily', 'novoice']) {
   test('TTS ' + mode + ': falls back seamlessly and ElevenLabs is skipped for the rest of the page session', async () => {
     const st = await open({ tts: mode });
     const { page } = st;

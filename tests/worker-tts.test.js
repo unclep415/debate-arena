@@ -84,6 +84,7 @@ test("tts: upstream error mapping; key and upstream messages never leak", async 
     [401, "invalid_api_key", 502, "unavailable"],
     [429, "rate_limit_exceeded", 503, "unavailable"],
     [429, "concurrent_limit_exceeded", 503, "unavailable"],
+    [429, "system_busy", 503, "unavailable"],
     [500, "internal", 502, "unavailable"],
     [422, "invalid_parameters", 502, "unavailable"],
   ];
@@ -92,6 +93,8 @@ test("tts: upstream error mapping; key and upstream messages never leak", async 
     const t = await r.text();
     assert.strictEqual(r.status, status, uc);
     assert.strictEqual(JSON.parse(t).code, code, uc);
+    // only real credit exhaustion is flagged as quota; transient 429s never are
+    assert.strictEqual(JSON.parse(t).reason, uc === "insufficient_credits" ? "quota" : undefined, uc);
     assert.ok(typeof JSON.parse(t).message === "string");
     assert.ok(!t.includes(KEY) && !t.includes("secret"), uc);
   }
@@ -169,7 +172,10 @@ test("index: /api/tts streams through the worker and a daily TTS call budget sto
     }
     const over = await w.fetch(post({ text: "hi", voice: "laura" }, { cookie }), env);
     assert.strictEqual(over.status, 429);
-    assert.strictEqual((await over.json()).code, "rate_limited");
+    const ob = await over.json();
+    assert.strictEqual(ob.code, "rate_limited");
+    assert.strictEqual(ob.reason, "daily", "our own backstop, distinct from ElevenLabs quota");
+    assert.doesNotMatch(ob.message, /credits/);
     assert.strictEqual(n, TTS_PER_DEBATE);
   } finally { globalThis.fetch = orig; }
 });

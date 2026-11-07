@@ -67,19 +67,21 @@
   function buildPersonaPrompt(topic, forText, againstText, voices) {
     var f = cleanInput(forText, 300);
     var a = cleanInput(againstText, 300);
+    var cast = castable(voices);
+    var giveVoice = cast.length ? ' (and a voice, below)' : '';
     var lines = [];
     lines.push('We are staging a funny debate between two characters on this topic: "' + topic + '"');
     lines.push('Side FOR argues in favor of the topic. Side AGAINST argues against it.');
     lines.push('');
     if (f) {
       lines.push('FOR character (given by the user): ' + f);
-      lines.push('Keep the user\'s description exactly as the personality; only give this character a name and a single emoji.');
+      lines.push('Keep the user\'s description exactly as the personality; only give this character a name and a single emoji' + giveVoice + '.');
     } else {
       lines.push('FOR character: invent one that is funny and appropriate to the topic.');
     }
     if (a) {
       lines.push('AGAINST character (given by the user): ' + a);
-      lines.push('Keep the user\'s description exactly as the personality; only give this character a name and a single emoji.');
+      lines.push('Keep the user\'s description exactly as the personality; only give this character a name and a single emoji' + giveVoice + '.');
     } else {
       lines.push('AGAINST character: invent one that is funny and appropriate to the topic.');
     }
@@ -87,7 +89,6 @@
       lines.push('Invented characters must be contrasting: very different from each other in temperament and style.');
     }
     lines.push('');
-    var cast = castable(voices);
     if (cast.length) {
       lines.push('Each character is spoken aloud in a voice. Pick the voice key that best fits each character; the two characters must use different voices. Available voices:');
       cast.forEach(function (v) { lines.push('- ' + v.key + ': ' + cleanInput(v.description || v.label || '', 120)); });
@@ -293,6 +294,7 @@
     cleanInput: cleanInput,
     buildPersonaPrompt: buildPersonaPrompt,
     normalizePersonas: normalizePersonas,
+    castable: castable,
     nameFromDescription: nameFromDescription,
     buildTurnPrompt: buildTurnPrompt,
     buildJudgePrompt: buildJudgePrompt,

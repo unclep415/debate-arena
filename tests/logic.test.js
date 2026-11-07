@@ -322,3 +322,20 @@ test('normalizePersonas with a single castable voice still returns it for both',
   const r = L.normalizePersonas(null, 'a', 'b', [{ key: 'x', description: 'd' }]);
   assert.strictEqual(r.for.voice, 'x'); assert.strictEqual(r.against.voice, 'x');
 });
+test('persona prompt with both personas typed + voices: keeps user text, asks for a voice; without voices identical to the claude.ai prompt', () => {
+  const p = L.buildPersonaPrompt('Cats', 'a grumpy pirate', 'a poet', VOICES_);
+  assert.match(p, /FOR character \(given by the user\): a grumpy pirate/);
+  assert.match(p, /only give this character a name and a single emoji \(and a voice, below\)\./);
+  assert.match(p, /"voice":"<voice key>"/);
+  const plain = L.buildPersonaPrompt('Cats', 'a grumpy pirate', 'a poet');
+  assert.ok(!/voice/i.test(plain));
+  assert.match(plain, /only give this character a name and a single emoji\.$/m);
+  const r = L.normalizePersonas({ for: { name: 'Cap', personality: 'ignored', voice: 'harry' }, against: { name: 'Bard', voice: 'lily' } }, 'a grumpy pirate', 'a poet', VOICES_);
+  assert.equal(r.for.personality, 'a grumpy pirate');
+  assert.equal(r.for.voice, 'harry');
+  assert.equal(r.against.voice, 'lily');
+});
+test('castable is exported and excludes the judge voice', () => {
+  assert.deepEqual(L.castable(VOICES_).map((v) => v.key), VOICES_.filter((v) => !v.judge).map((v) => v.key));
+  assert.deepEqual(L.castable(undefined), []);
+});

@@ -115,7 +115,9 @@
 
   async function getPersonas(topic, forText, againstText) {
     var voices = await getVoices();
-    if (forText && againstText) return L.normalizePersonas(null, forText, againstText, voices);
+    // Both personas typed: no model call (claude.ai always; hosted with voice off or no voice list).
+    // Hosted with voice on still asks Claude to cast fitting voices (and a name/emoji) for the typed characters.
+    if (forText && againstText && !(voiceOn && L.castable(voices).length)) return L.normalizePersonas(null, forText, againstText, voices);
     controller = new AbortController();
     var raw;
     try {

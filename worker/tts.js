@@ -16,7 +16,9 @@ export function handleVoices() {
 // Upstream status + detail.code -> our status/code. Quota is rate_limited; a missing voice is
 // voice_not_found; everything else is a generic, retry-later "unavailable".
 function mapError(status, code) {
-  if (status === 402 || code === "insufficient_credits") return [429, "rate_limited", "Premium voices are out of credits right now."];
+  // Only real quota exhaustion is "rate_limited" (reason "quota"); a transient upstream 429
+  // (rate_limit_exceeded / concurrent_limit_exceeded / system_busy) is a retry-later "unavailable".
+  if (status === 402 || code === "insufficient_credits" || code === "quota_exceeded") return [429, "rate_limited", "Premium voices are out of credits right now.", "quota"];
   if (code === "voice_not_found" || code === "voice_access_denied") return [502, "voice_not_found", "That voice is not available."];
   return [status === 429 ? 503 : 502, "unavailable", "The voice service is unavailable."];
 }
@@ -46,8 +48,8 @@ export async function handleTts(request, env, fetchImpl = fetch) {
     let code = "";
     try { const j = await upstream.json(); code = j && j.detail && typeof j.detail.code === "string" ? j.detail.code : ""; } catch { /* not JSON */ }
     try { if (upstream.body && !upstream.bodyUsed) await upstream.body.cancel(); } catch { /* ignore */ }
-    const [status, c, message] = mapError(upstream.status, code);
-    return jsonError(status, c, message);
+    const [status, c, message, reason] = mapError(upstream.status, code);
+    return reason ? Response.json({ code: c, reason, message }, { status }) : jsonError(status, c, message);
   }
   return new Response(upstream.body, { status: 200, headers: { "content-type": "audio/mpeg" } });
 }
