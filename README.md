@@ -37,14 +37,23 @@ button; a judge that can't score offers "Retry judge"; nothing retries
 automatically. Permission declined (or Claude disabled for the account/view)
 shows a banner and disables Start for the rest of the view.
 
+**Voice**: a "🔊 Voice" toggle (setup screen and debate toolbar, off by default,
+remembered in `localStorage` when available) reads each turn aloud with the
+browser's built-in speech synthesis, in a distinct voice (or pitch/rate) per
+debater, and the judge reads the verdict. The next turn starts only after the
+current one has been spoken. Turning it off, Stop or New debate cancels speech
+at once. The toggle is hidden if the browser has no `speechSynthesis`.
+
 ## Files
 
 - `src/index.html` — markup and styles (light and dark themes); loads the two scripts.
 - `src/logic.js` — pure functions: topics, input cleanup, prompt builders
   (`buildPersonaPrompt`, `buildTurnPrompt`, `buildJudgePrompt`), persona and
   verdict normalization. Works in the browser and in Node.
+- `src/voice.js` — text-to-speech wrapper (`DebateVoice`: voice assignment, `speak`, `cancel`).
 - `src/app.js` — DOM wiring and the debate engine (all `sample` calls).
 - `tests/logic.test.js` — unit tests for `logic.js`.
+- `tests/voice.test.js`, `tests/app-voice.test.js` — voice unit and Playwright tests.
 - `tests/app.test.js` — Playwright tests that open `src/index.html` with a
   stubbed `window.claude`.
 - `docs/` — design spec, build plan and the `sample` API type definitions.
@@ -59,5 +68,5 @@ node --test tests/*.test.js
 
 ## Publishing
 
-Publish `src/index.html` as the artifact page with `logic.js` and `app.js` as
+Publish `src/index.html` as the artifact page with `logic.js`, `voice.js` and `app.js` as
 supporting files at the same relative paths, and `capabilities: {sample: {}}`.

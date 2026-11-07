@@ -1,6 +1,7 @@
 (function () {
   'use strict';
   var L = globalThis.DebateLogic;
+  var V = globalThis.DebateVoice;
   var $ = function (id) { return document.getElementById(id); };
 
   var sample = null;      // resolved sample capability
@@ -17,6 +18,35 @@
     arena: $('arena'), topicBanner: $('topicBanner'), status: $('status'),
     stop: $('stop'), retryPersonas: $('retryPersonas'), newDebate: $('newDebate'), transcript: $('transcript')
   };
+
+  // Voice (text-to-speech). Default off; remembered in localStorage when it is available.
+  var VOICE_KEY = 'debate-voice';
+  var voiceSupported = !!(V && V.isSupported());
+  var voiceOn = false;
+  if (voiceSupported) {
+    try { voiceOn = localStorage.getItem(VOICE_KEY) === '1'; } catch (e) { voiceOn = false; }
+  }
+  var voiceBtns = [$('voiceSetup'), $('voiceArena')];
+  function renderVoice() {
+    voiceBtns.forEach(function (b) {
+      b.hidden = !voiceSupported;
+      b.setAttribute('aria-pressed', voiceOn ? 'true' : 'false');
+      b.textContent = '🔊 Voice: ' + (voiceOn ? 'on' : 'off');
+    });
+  }
+  function setVoice(on) {
+    voiceOn = !!on;
+    try { localStorage.setItem(VOICE_KEY, voiceOn ? '1' : '0'); } catch (e) { /* storage unavailable */ }
+    if (!voiceOn && voiceSupported) V.cancel();
+    renderVoice();
+  }
+  function cancelSpeech() { if (voiceSupported) V.cancel(); }
+  // Speak only for the current, un-stopped run; resolves when speech ends or is cancelled.
+  async function say(id, text, speaker, name) {
+    if (!voiceOn || !voiceSupported || aborted(id)) return;
+    setStatus(name + ' is speaking aloud…');
+    await V.speak(text, speaker);
+  }
 
   function showBanner(msg) { els.banner.textContent = msg; els.banner.hidden = false; }
 
@@ -177,6 +207,7 @@
     var againstText = L.cleanInput(els.againstP.value, 300);
     if (!topic || !sample || running) return;
     cancelPending();
+    cancelSpeech();
     running = true; stopped = false; myRun = ++runId;
     refreshStart();
     setInputsDisabled(true);
@@ -248,6 +279,8 @@
       bubble.text.classList.remove('cursor');
       transcript.push({ side: turn.side, round: turn.round, name: persona.name, text: text });
       if (isAbort()) return stopOrStale();
+      await say(myRun, text, turn.side, persona.name);
+      if (isAbort()) return stopOrStale();
     }
 
     while (true) {
@@ -266,6 +299,9 @@
       if (isAbort()) return stopOrStale();
       if (verdict) {
         renderScorecard(personas, verdict);
+        var spoken = verdict.winner === 'tie' ? 'It’s a tie.' : 'Winner: ' + personas[verdict.winner].name + '.';
+        await say(myRun, spoken + (verdict.reasoning ? ' ' + verdict.reasoning : ''), 'judge', 'The judge');
+        if (isAbort()) return stopOrStale();
         return endDebate('The debate is over.');
       }
       setStatus('Paused: the judge needs another go.');
@@ -283,16 +319,20 @@
   els.stop.addEventListener('click', function () {
     stopped = true;
     cancelPending();
+    cancelSpeech();
     if (controller) controller.abort();
     endDebate('Debate stopped.');
   });
   els.newDebate.addEventListener('click', function () {
     cancelPending();
+    cancelSpeech();
     els.arena.hidden = true; els.setup.hidden = false;
     setInputsDisabled(false); refreshStart();
   });
   els.retryPersonas.addEventListener('click', function () { runDebate(); });
 
+  voiceBtns.forEach(function (b) { b.addEventListener('click', function () { setVoice(!voiceOn); }); });
+  renderVoice();
   refreshStart();
   var p;
   try { p = Promise.resolve(window.claude && window.claude.use('sample')); } catch (e) { p = Promise.resolve(null); }

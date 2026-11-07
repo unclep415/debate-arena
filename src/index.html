@@ -64,6 +64,8 @@
   button:disabled { opacity: .5; cursor: not-allowed; }
   #dice { font-size: 1.3rem; padding: 6px 12px; line-height: 1; }
   #start { background: var(--fg); color: var(--bg); font-family: var(--font-display); font-weight: 400; font-size: 1.15rem; padding: 14px 20px; }
+  .voice-toggle { align-self: flex-start; }
+  .voice-toggle[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
   #arena { display: flex; flex-direction: column; gap: 16px; }
   .topic-banner { margin: 0; padding: 12px 14px; background: var(--surface); border: 2px solid var(--line); border-radius: 8px; overflow-wrap: anywhere; }
   .toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
@@ -139,6 +141,7 @@
         <textarea id="againstPersona" maxlength="300" placeholder="Leave blank to invent one"></textarea>
       </div>
     </div>
+    <button id="voiceSetup" class="voice-toggle" type="button" aria-pressed="false" hidden>🔊 Voice: off</button>
     <button id="start" type="submit" disabled>Connecting…</button>
     <button id="retryPersonas" type="button" hidden>Retry casting the debaters</button>
   </form>
@@ -147,6 +150,7 @@
     <p class="topic-banner" id="topicBanner"></p>
     <div class="toolbar">
       <p id="status" role="status"></p>
+      <button id="voiceArena" class="voice-toggle" type="button" aria-pressed="false" hidden>🔊 Voice: off</button>
       <button id="stop" type="button" hidden>Stop</button>
       <button id="newDebate" type="button" hidden>New debate</button>
     </div>
@@ -155,4 +159,5 @@
 </main>
 
 <script src="logic.js"></script>
+<script src="voice.js"></script>
 <script src="app.js"></script>
