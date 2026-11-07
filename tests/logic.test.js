@@ -90,8 +90,32 @@ test('normalizePersonas valid, user text wins, caps, grapheme', () => {
 test('normalizePersonas multi-codepoint grapheme and non-string fields', () => {
   const r = L.normalizePersonas({ for: { name: 5, emoji: '👨‍👩‍👧x', personality: null } }, 'mine', '');
   assert.strictEqual(r.for.emoji, '👨‍👩‍👧');
-  assert.strictEqual(r.for.name, 'Debater For');
+  assert.strictEqual(r.for.name, 'Mine');
   assert.strictEqual(r.for.personality, 'mine');
+});
+
+test('nameFromDescription: title-cased first words, article stripped, <=40 chars', () => {
+  const n = L.nameFromDescription;
+  assert.strictEqual(n('a grumpy 1800s pirate'), 'Grumpy 1800s Pirate');
+  assert.strictEqual(n('  An   angry poet  '), 'Angry Poet');
+  assert.strictEqual(n('The NASA engineer, very smart'), 'NASA Engineer');
+  assert.strictEqual(n('a pirate who loves rum and also cats'), 'Pirate Who Loves Rum');
+  assert.strictEqual(n('über-cool ninja'), 'Über-cool Ninja');
+  assert.strictEqual(n('(pirate) yarr'), 'Pirate');
+  assert.ok(n('Supercalifragilisticexpialidocious Mary Poppins Nanny').length <= 40);
+  assert.strictEqual(n('x'.repeat(60)).length, 40);
+  for (const blank of ['', '   ', 'a', 'The', '...', null, undefined]) assert.strictEqual(n(blank), '');
+});
+
+test('normalizePersonas: user text without model name gets a derived name and default emoji', () => {
+  const r = L.normalizePersonas(null, 'a grumpy 1800s pirate', 'the cheerful robot');
+  assert.deepStrictEqual([r.for.name, r.for.emoji], ['Grumpy 1800s Pirate', '🟦']);
+  assert.deepStrictEqual([r.against.name, r.against.emoji], ['Cheerful Robot', '🟥']);
+  assert.strictEqual(r.for.personality, 'a grumpy 1800s pirate');
+  // a model-supplied name still wins
+  assert.strictEqual(L.normalizePersonas({ for: { name: 'Cap\'n Grump' } }, 'a grumpy pirate', '').for.name, "Cap'n Grump");
+  // underivable user text falls back to the default name
+  assert.strictEqual(L.normalizePersonas(null, '...', '').for.name, 'Debater For');
 });
 
 const personas = {

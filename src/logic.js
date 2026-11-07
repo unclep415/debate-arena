@@ -107,6 +107,30 @@
     return '';
   }
 
+  // Short display name from a user-written persona, no model call:
+  // "a grumpy 1800s pirate, hates rum" -> "Grumpy 1800s Pirate".
+  // Cuts at the first clause punctuation, drops a leading article, keeps up to
+  // 4 words, title-cases each word's first letter, never exceeds 40 chars.
+  function nameFromDescription(text) {
+    var s = cleanInput(text, 300).split(/[,.;:!?()\[\]{}"\u201C\u201D]/)
+      .map(function (x) { return x.trim(); }).filter(Boolean)[0] || '';
+    var words = s.split(' ').filter(Boolean);
+    while (words.length > 1 && /^(a|an|the)$/i.test(words[0])) words.shift();
+    if (words.length === 1 && /^(a|an|the)$/i.test(words[0])) return '';
+    var out = '';
+    for (var i = 0; i < words.length && i < 4; i++) {
+      var w = Array.from(words[i]);
+      w[0] = w[0].toUpperCase();
+      var next = (out ? out + ' ' : '') + w.join('');
+      if (next.length > 40) {
+        if (!out) out = cleanInput(next, 40);
+        break;
+      }
+      out = next;
+    }
+    return out;
+  }
+
   function normalizePersonas(raw, forText, againstText) {
     var user = { for: cleanInput(forText, 300), against: cleanInput(againstText, 300) };
     var out = {};
@@ -116,7 +140,7 @@
       var emoji = firstGrapheme(r.emoji);
       var personality = typeof r.personality === 'string' ? cleanInput(r.personality, 300) : '';
       out[side] = {
-        name: name || DEFAULTS[side].name,
+        name: name || nameFromDescription(user[side]) || DEFAULTS[side].name,
         emoji: emoji || DEFAULTS[side].emoji,
         personality: user[side] || personality
       };
@@ -230,6 +254,7 @@
     cleanInput: cleanInput,
     buildPersonaPrompt: buildPersonaPrompt,
     normalizePersonas: normalizePersonas,
+    nameFromDescription: nameFromDescription,
     buildTurnPrompt: buildTurnPrompt,
     buildJudgePrompt: buildJudgePrompt,
     normalizeVerdict: normalizeVerdict

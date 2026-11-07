@@ -72,6 +72,7 @@ async function open(cfg = {}, viewport) {
   return { page, ctx, errors };
 }
 
+const done = (page) => page.waitForFunction(() => document.querySelectorAll('.bubble').length === 6 && !document.querySelector('#stop:not([hidden])'));
 const calls = (page, kind) => page.evaluate((k) => window.__calls.filter((c) => !k || c.kind === k).length, kind);
 
 async function fillAndStart(page, { topic = 'Cats vs dogs', f = 'A pirate', a = 'A poet' } = {}) {
@@ -157,6 +158,17 @@ test('speakers are named from personas (generated names)', async () => {
   await page.waitForFunction(() => !document.querySelector('#stop:not([hidden])'));
   const hood = await page.$eval('.bubble:nth-of-type(2) details', (d) => d.textContent);
   assert.match(hood, /Gen For \(FOR/);
+  await ctx.close();
+});
+
+test('both personas given: speakers get names derived from the text, default emojis, no call', async () => {
+  const { page, ctx } = await open();
+  await fillAndStart(page, { f: 'a grumpy 1800s pirate', a: 'the cheerful robot, loves oil' });
+  await done(page);
+  const who = await page.$$eval('.bubble', (bs) => bs.slice(0, 2).map((b) => [b.querySelector('.emoji').textContent, b.querySelector('.name').textContent]));
+  assert.deepEqual(who, [['🟦', 'Grumpy 1800s Pirate'], ['🟥', 'Cheerful Robot']]);
+  assert.equal(await page.$eval('.scorecard [data-side="for"] .name', (e) => e.textContent), 'Grumpy 1800s Pirate');
+  assert.equal(await calls(page, 'json'), 0);
   await ctx.close();
 });
 
@@ -298,7 +310,6 @@ test('hidden attribute really hides setup/arena (CSS display must not override i
 });
 
 const GOOD = { scores: { for: { logic: 8, persuasion: 7, character: 6 }, against: { logic: 5, persuasion: 5, character: 5 } }, winner: 'for', reasoning: 'For was funnier. Case closed.' };
-const done = (page) => page.waitForFunction(() => document.querySelectorAll('.bubble').length === 6 && !document.querySelector('#stop:not([hidden])'));
 
 test('happy path shows scorecard with personas, scores, totals, winner, reasoning', async () => {
   const { page, ctx, errors } = await open();
@@ -309,7 +320,7 @@ test('happy path shows scorecard with personas, scores, totals, winner, reasonin
   const judgeInput = await page.evaluate(() => window.__calls.find((c) => c.kind === 'judge').input);
   assert.match(judgeInput, /Turn 6 text/);
   const t = await page.$eval('.scorecard', (e) => e.textContent);
-  assert.match(t, /Debater For/); assert.match(t, /Debater Against/); assert.match(t, /🟦/);
+  assert.match(t, /Pirate/); assert.match(t, /Poet/); assert.match(t, /🟦/); assert.match(t, /🟥/);
   assert.match(t, /logic/i); assert.match(t, /persuasion/i); assert.match(t, /character/i);
   assert.match(t, /For was funnier/);
   assert.equal(await page.$eval('.scorecard [data-side="for"] .total', (e) => e.textContent.trim()), '21');
