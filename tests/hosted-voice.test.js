@@ -42,6 +42,7 @@ async function serve(opts = {}) {
       if (opts.tts === 'daily') return json(429, { code: 'rate_limited', reason: 'daily', message: 'Daily premium-voice limit reached — try again tomorrow.' });
       if (opts.tts === 'busy') return json(503, { code: 'unavailable', message: 'The voice service is unavailable.' });
       if (opts.tts === 'novoice') return json(502, { code: 'voice_not_found', message: 'gone' });
+      if (opts.tts === 'nokey') return json(500, { code: 'not_configured', message: 'Premium voices are not configured (no ELEVENLABS_API_KEY); using browser voices.' });
       if (opts.tts === 'unauth') return json(401, { code: 'not_granted', message: 'x' });
       const data = wav(opts.clipMs || 150);
       res.writeHead(200, { 'content-type': 'audio/wav', 'content-length': data.length });
@@ -237,7 +238,7 @@ test('TTS 500: that turn falls back to browser speech, every turn still tries El
   await st.close();
 });
 
-for (const mode of ['quota', 'daily', 'novoice']) {
+for (const mode of ['quota', 'daily', 'novoice', 'nokey']) {
   test('TTS ' + mode + ': falls back seamlessly and ElevenLabs is skipped for the rest of the page session', async () => {
     const st = await open({ tts: mode });
     const { page } = st;

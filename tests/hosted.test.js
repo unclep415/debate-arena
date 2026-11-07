@@ -41,6 +41,7 @@ async function serve(opts = {}) {
       const n = st.sampleN++;
       res.on('close', () => { if (!res.writableEnded) st.aborted++; });
       if (!st.authed) { res.writeHead(401, { 'content-type': 'application/json' }); return res.end('{"code":"not_granted","message":"no"}'); }
+      if (opts.nokey) { res.writeHead(500, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ code: 'not_configured', message: 'Server is not configured: the site owner must set the ANTHROPIC_API_KEY secret in Cloudflare.' })); }
       if (opts.cap && body.debateStart) { res.writeHead(429, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ code: 'rate_limited', message: 'Daily debate limit reached — try again tomorrow.' })); }
       if (!opts.raw) res.writeHead(200, { 'content-type': 'text/event-stream' });
       if (body.json && !opts.raw) {
@@ -49,6 +50,7 @@ async function serve(opts = {}) {
         return res.end();
       }
       if (opts.raw) return opts.raw(res, body, n);
+      if (opts.badKey) { sse(res, { error: { code: 'not_granted', message: "The server's Anthropic API key was rejected. The site owner should check the ANTHROPIC_API_KEY secret in Cloudflare." } }); return res.end(); }
       if (opts.errorAt === n) { sse(res, { delta: 'part' }); sse(res, { error: { code: opts.errorCode || 'unavailable', message: 'Down.' } }); return res.end(); }
       const text = 'Turn ' + (n + 1) + ' text here';
       const mid = Math.floor(text.length / 2);
@@ -299,4 +301,22 @@ test('SSE parser: stream ending without done rejects unavailable with partial te
   const out = await rawCall(['data: {"delta":"half"}\n\n']);
   assert.equal(out.err.code, 'unavailable');
   assert.equal(out.err.text, 'half');
+});
+
+test('missing ANTHROPIC_API_KEY: page shows the clear server message, no crash', async () => {
+  const st = await open({ authed: true, nokey: true });
+  await startDebate(st.page, true);
+  await st.page.waitForFunction(() => /ANTHROPIC_API_KEY secret/.test(document.body.textContent));
+  assert.doesNotMatch(await st.page.textContent('body'), /Permission was declined/);
+  assert.deepEqual(st.errors, []);
+  await st.close();
+});
+
+test('rejected Anthropic key (not_granted): hosted banner explains the server key, not the claude.ai permission copy', async () => {
+  const st = await open({ authed: true, badKey: true });
+  await startDebate(st.page, true);
+  await st.page.waitForFunction(() => /Anthropic API key was rejected/.test(document.querySelector('#banner').textContent));
+  assert.doesNotMatch(await st.page.textContent('#banner'), /Permission was declined/);
+  assert.deepEqual(st.errors, []);
+  await st.close();
 });

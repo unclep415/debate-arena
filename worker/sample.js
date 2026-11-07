@@ -10,7 +10,7 @@ const JSON_SYSTEM = "Respond with a single valid JSON value only. No markdown fe
 
 const MESSAGES = {
   rate_limited: "The AI service is busy or rate limited. Please try again shortly.",
-  not_granted: "The server is not authorized to reach the AI service.",
+  not_granted: "The server's Anthropic API key was rejected. The site owner should check the ANTHROPIC_API_KEY secret in Cloudflare.",
   invalid_request: "The request was not accepted.",
   invalid_json: "The model did not return valid JSON.",
   refused: "The AI declined to answer this request.",
@@ -94,7 +94,7 @@ export function jsonError(status, code, message) {
 export async function handleSample(body, env, fetchImpl = fetch) {
   const v = validateInput(body && body.input);
   if (!v.ok) return jsonError(400, "invalid_request", v.message);
-  if (!env.ANTHROPIC_API_KEY) return sseResponse(err("unavailable"));
+  if (!env.ANTHROPIC_API_KEY) return jsonError(500, "not_configured", "Server is not configured: the site owner must set the ANTHROPIC_API_KEY secret in Cloudflare.");
   const wantJson = !!(body && body.json);
   const up = buildUpstreamRequest(env.ANTHROPIC_API_KEY, v.messages, wantJson);
   let upstream;

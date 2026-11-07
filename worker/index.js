@@ -8,6 +8,9 @@ import { isHtmlEntry, rewriteHtmlResponse } from "./inject.js";
 export { DailyCap } from "./cap.js";
 
 const limiter = createLimiter();
+export const NOT_CONFIGURED_SESSION = "Server is not configured: the site owner must set the ACCESS_PASSCODE and SESSION_SECRET secrets in Cloudflare.";
+export const NOT_CONFIGURED_CLAUDE = "Server is not configured: the site owner must set the ANTHROPIC_API_KEY secret in Cloudflare.";
+export const NOT_CONFIGURED_TTS = "Premium voices are not configured (no ELEVENLABS_API_KEY); using browser voices.";
 const CAP_MESSAGE = "Daily debate limit reached — try again tomorrow.";
 // Our own per-day /api/tts backstop (not ElevenLabs credits, which answer reason "quota").
 const TTS_CAP_MESSAGE = "Daily premium-voice limit reached — try again tomorrow.";
@@ -43,7 +46,8 @@ async function isGranted(request, env) {
 }
 
 async function postSession(request, env) {
-  if (!env.ACCESS_PASSCODE || !env.SESSION_SECRET) return jsonError(503, "unavailable", "Server is not configured.");
+  // Fail closed: without both secrets nobody can sign in (never a default passcode or key).
+  if (!env.ACCESS_PASSCODE || !env.SESSION_SECRET) return jsonError(500, "not_configured", NOT_CONFIGURED_SESSION);
   const ip = request.headers.get("CF-Connecting-IP") || "unknown";
   if (limiter.isBlocked(ip)) return jsonError(429, "rate_limited", "Too many attempts. Try again in a few minutes.");
   const body = await readJson(request);
@@ -71,6 +75,8 @@ async function postSample(request, env) {
   if (!body || typeof body !== "object") return jsonError(400, "invalid_request", "Invalid JSON body.");
   const v = validateInput(body.input);
   if (!v.ok) return jsonError(400, "invalid_request", v.message);
+  // Checked before the cap so a misconfigured server does not burn daily debate slots.
+  if (!env.ANTHROPIC_API_KEY) return jsonError(500, "not_configured", NOT_CONFIGURED_CLAUDE);
   const limit = parseLimit(env.DAILY_CAP);
   try {
     if (body.debateStart === true && !(await takeSlot(env, "global", limit))) return jsonError(429, "rate_limited", CAP_MESSAGE);
@@ -81,6 +87,7 @@ async function postSample(request, env) {
 
 async function postTts(request, env) {
   if (request.method !== "POST") return jsonError(405, "invalid_request", "Method not allowed.");
+  if (!env.ELEVENLABS_API_KEY) return jsonError(500, "not_configured", NOT_CONFIGURED_TTS);
   try {
     if (!(await takeSlot(env, "global-tts", parseLimit(env.DAILY_CAP) * TTS_PER_DEBATE))) return Response.json({ code: "rate_limited", reason: "daily", message: TTS_CAP_MESSAGE }, { status: 429 });
   } catch { return jsonError(503, "unavailable", "Usage counter unavailable. Please try again."); }
@@ -98,7 +105,7 @@ async function handleApi(request, env, path) {
   if (!(await isGranted(request, env))) return jsonError(401, "not_granted", "Passcode required.");
   if (path === "/api/sample") return postSample(request, env);
   if (path === "/api/tts") return postTts(request, env);
-  if (path === "/api/voices") return request.method === "GET" ? handleVoices() : jsonError(405, "invalid_request", "Method not allowed.");
+  if (path === "/api/voices") return request.method === "GET" ? handleVoices(env) : jsonError(405, "invalid_request", "Method not allowed.");
   return jsonError(404, "invalid_request", "Not found.");
 }
 

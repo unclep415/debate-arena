@@ -141,6 +141,8 @@
   function isPermanent(err) { return !!(err && PERMANENT[err.code]); }
   function blockFor(err) {
     blocked = true;
+    // Hosted site: not_granted means the server's API key was rejected; show the server's own explanation.
+    if (globalThis.DebateHost && err.message) return showBanner(err.message);
     showBanner(err.code === 'not_granted' ? DECLINED : 'Claude isn’t available for this account or view, so the debate can’t run.');
   }
   function errorCopy(err) {

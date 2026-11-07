@@ -224,9 +224,10 @@
         if (done) return null;
         if (res.ok) return res.blob();
         return res.json().catch(function () { return {}; }).then(function (b) {
-          // ElevenLabs out of credits or our daily TTS budget used up (both rate_limited), or a retired voice:
+          // ElevenLabs out of credits or our daily TTS budget used up (both rate_limited), a retired voice,
+          // or no/bad ElevenLabs key (not_configured):
           // stop asking for the rest of this page session. Transient upstream 429s arrive as 503 unavailable.
-          if (b && (b.code === 'rate_limited' || b.code === 'voice_not_found')) ttsOff = true;
+          if (b && (b.code === 'rate_limited' || b.code === 'voice_not_found' || b.code === 'not_configured')) ttsOff = true;
           finish('failed');
           return null;
         });

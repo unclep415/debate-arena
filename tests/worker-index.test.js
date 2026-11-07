@@ -255,3 +255,49 @@ test("static: HTML and JS are served with a UTF-8 charset (existing charset kept
   assert.strictEqual(await ct("/y.js"), "text/javascript; charset=utf-8");
   assert.strictEqual(await ct("/z.png"), "image/png");
 });
+
+test("missing secrets fail closed with a clear 500, never granting access", async () => {
+  const { default: w } = await loadIndex();
+  for (const over of [{ ACCESS_PASSCODE: undefined }, { SESSION_SECRET: undefined }, { ACCESS_PASSCODE: "", SESSION_SECRET: "" }]) {
+    const env = await makeEnv(over);
+    for (const pass of ["open sesame", "", "undefined"]) {
+      const r = await w.fetch(post("/api/session", { passcode: pass }), env);
+      assert.strictEqual(r.status, 500);
+      assert.strictEqual(r.headers.get("set-cookie"), null);
+      const b = await r.json();
+      assert.strictEqual(b.code, "not_configured");
+      assert.match(b.message, /ACCESS_PASSCODE and SESSION_SECRET/);
+    }
+    assert.strictEqual((await w.fetch(new Request("https://x.test/api/session"), env)).status, 401);
+    assert.strictEqual((await w.fetch(post("/api/sample", { input: "hi" }), env)).status, 401);
+  }
+  // A cookie minted under an old secret is rejected once SESSION_SECRET is removed.
+  const good = await makeEnv();
+  const cookie = await login(w, good);
+  const noSecret = await makeEnv({ SESSION_SECRET: undefined });
+  assert.strictEqual((await w.fetch(post("/api/sample", { input: "hi" }, { cookie }), noSecret)).status, 401);
+});
+
+test("missing ANTHROPIC_API_KEY: clear 500 not_configured, no upstream call, no daily slot burned", async () => {
+  const { default: w } = await loadIndex();
+  const env = await makeEnv({ ANTHROPIC_API_KEY: undefined, DAILY_CAP: "1" });
+  const cookie = await login(w, env);
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => assert.fail("no upstream call");
+  try {
+    for (let i = 0; i < 3; i++) {
+      const r = await w.fetch(post("/api/sample", { input: "hi", debateStart: true }, { cookie }), env);
+      assert.strictEqual(r.status, 500);
+      const b = await r.json();
+      assert.strictEqual(b.code, "not_configured");
+      assert.match(b.message, /ANTHROPIC_API_KEY/);
+    }
+  } finally { globalThis.fetch = orig; }
+  env.ANTHROPIC_API_KEY = "sk-ant-test";
+  globalThis.fetch = upstream("x");
+  try {
+    const r = await w.fetch(post("/api/sample", { input: "hi", debateStart: true }, { cookie }), env);
+    assert.strictEqual(r.status, 200, "the day's only debate slot is still free");
+    await r.text();
+  } finally { globalThis.fetch = orig; }
+});

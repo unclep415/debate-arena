@@ -81,7 +81,7 @@ test("tts: upstream error mapping; key and upstream messages never leak", async 
     [402, "insufficient_credits", 429, "rate_limited"],
     [404, "voice_not_found", 502, "voice_not_found"],
     [403, "voice_access_denied", 502, "voice_not_found"],
-    [401, "invalid_api_key", 502, "unavailable"],
+    [401, "invalid_api_key", 502, "not_configured"],
     [429, "rate_limit_exceeded", 503, "unavailable"],
     [429, "concurrent_limit_exceeded", 503, "unavailable"],
     [429, "system_busy", 503, "unavailable"],
@@ -108,11 +108,12 @@ test("tts: upstream error mapping; key and upstream messages never leak", async 
   assert.strictEqual(JSON.parse(t).code, "unavailable");
 });
 
-test("tts: no key configured -> 503 unavailable without calling upstream", async () => {
+test("tts: no key configured -> 500 not_configured without calling upstream", async () => {
   const { handleTts } = await loadTts();
   let calls = 0;
   const r = await handleTts(post({ text: "hi" }), {}, async () => { calls++; return mp3(); });
-  assert.strictEqual(r.status, 503);
+  assert.strictEqual(r.status, 500);
+  assert.strictEqual((await r.json()).code, "not_configured");
   assert.strictEqual(calls, 0);
 });
 
@@ -177,5 +178,24 @@ test("index: /api/tts streams through the worker and a daily TTS call budget sto
     assert.strictEqual(ob.reason, "daily", "our own backstop, distinct from ElevenLabs quota");
     assert.doesNotMatch(ob.message, /credits/);
     assert.strictEqual(n, TTS_PER_DEBATE);
+  } finally { globalThis.fetch = orig; }
+});
+
+test("index: no ELEVENLABS_API_KEY -> empty voice list, /api/tts 500 not_configured, no TTS slot used", async () => {
+  const { default: w } = await loadIndex();
+  const env = await makeEnv({ ELEVENLABS_API_KEY: undefined });
+  const cookie = await login(w, env);
+  const v = await w.fetch(new Request("https://x.test/api/voices", { headers: { cookie } }), env);
+  assert.deepStrictEqual(await v.json(), { voices: [] });
+  const orig = globalThis.fetch;
+  globalThis.fetch = async () => assert.fail("no upstream call");
+  try {
+    for (let i = 0; i < 20; i++) {
+      const r = await w.fetch(post({ text: "hi", voice: "laura" }, { cookie }), env);
+      assert.strictEqual(r.status, 500);
+      const b = await r.json();
+      assert.strictEqual(b.code, "not_configured");
+      assert.match(b.message, /ELEVENLABS_API_KEY/);
+    }
   } finally { globalThis.fetch = orig; }
 });
