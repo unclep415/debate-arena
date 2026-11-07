@@ -93,10 +93,26 @@
 
   function aborted(id) { return stopped || id !== runId; }
 
+  // Hosted site only: the first model call of a debate is flagged so the server can count it
+  // against the daily cap. Never added on claude.ai (the real sample API may reject unknown options).
+  var hostStart = true;
+  function startOpts(o) {
+    if (globalThis.DebateHost && hostStart) o.debateStart = true;
+    return o;
+  }
+  // Keep the flag until a call actually reached the model (not refused by the cap or auth).
+  function startSettled(err) {
+    if (!err || !(err.code === 'rate_limited' || err.code === 'session_expired' || err.code === 'cancelled')) hostStart = false;
+  }
+
   async function getPersonas(topic, forText, againstText) {
     if (forText && againstText) return L.normalizePersonas(null, forText, againstText);
     controller = new AbortController();
-    var raw = await sample.json(L.buildPersonaPrompt(topic, forText, againstText), { signal: controller.signal, cache: false });
+    var raw;
+    try {
+      raw = await sample.json(L.buildPersonaPrompt(topic, forText, againstText), startOpts({ signal: controller.signal, cache: false }));
+    } catch (e) { startSettled(e); throw e; }
+    startSettled(null);
     return L.normalizePersonas(raw, forText, againstText);
   }
 
@@ -118,6 +134,7 @@
   }
   function errorCopy(err) {
     var code = err && err.code;
+    if (code === 'rate_limited' && err.daily) return err.message;
     if (code === 'rate_limited') return 'Claude is rate limited right now. Wait a moment, then retry.';
     if (code === 'session_expired') return 'Your Claude session expired. Sign in again, then retry.';
     if (code === 'refused') return 'Claude declined to write this turn. Retrying may go differently, or start a new debate with a different topic.';
@@ -210,6 +227,7 @@
     cancelSpeech();
     if (voiceOn && voiceSupported) V.prime(); // still inside the Start click: unlocks later speech
     running = true; stopped = false; myRun = ++runId;
+    hostStart = true;
     refreshStart();
     setInputsDisabled(true);
     els.transcript.textContent = '';
@@ -251,13 +269,15 @@
         setStatus(persona.name + ' is speaking (' + turn.round + ', turn ' + (i + 1) + ' of ' + L.TURNS.length + ')');
         controller = new AbortController();
         try {
-          var res = await sample(messages, {
+          var res = await sample(messages, startOpts({
             signal: controller.signal,
             cache: false,
             onText: function (u) { if (myRun === runId) bubble.text.textContent = u.text; }
-          });
+          }));
+          startSettled(null);
           text = (res && typeof res.text === 'string') ? res.text : bubble.text.textContent;
         } catch (err) {
+          startSettled(err);
           if (isAbort()) { bubble.text.classList.remove('cursor'); return stopOrStale(); }
           bubble.text.classList.remove('cursor');
           if (err && err.code === 'cancelled') return endDebate('Debate stopped.');
@@ -336,7 +356,7 @@
   renderVoice();
   refreshStart();
   var p;
-  try { p = Promise.resolve(window.claude && window.claude.use('sample')); } catch (e) { p = Promise.resolve(null); }
+  try { p = Promise.resolve(globalThis.DebateHost ? globalThis.DebateHost.sample() : window.claude && window.claude.use('sample')); } catch (e) { p = Promise.resolve(null); }
   p.then(function (s) { return s; }, function () { return null; }).then(function (s) {
     connecting = false;
     sample = s || null;
