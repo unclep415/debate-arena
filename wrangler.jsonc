@@ -1,0 +1,9 @@
+{
+  "name": "debate-arena",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-11-01",
+  "assets": { "directory": "./src", "binding": "ASSETS", "run_worker_first": true },
+  "durable_objects": { "bindings": [{ "name": "CAP", "class_name": "DailyCap" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["DailyCap"] }],
+  "vars": { "DAILY_CAP": "20" }
+}
