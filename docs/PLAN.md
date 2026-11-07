@@ -42,7 +42,7 @@ Empty repo with the spec. No code yet.
   `src/index.html` via `file://` with `page.addInitScript` installing a fake
   `window.claude` whose `use("sample")` returns a scripted stub
   (deterministic text, simulated streaming, injectable failures).
-- Test command for everything: `node --test tests/`
+- Test command for everything: `node --test tests/*.test.js` (plain `node --test tests/` fails on Node 22.23)
 
 ## Tasks
 
@@ -79,7 +79,7 @@ Acceptance:
 - Unit tests for every function, including: whitespace-only input → '';
   over-long input capped; one persona given + one blank; judge returns
   strings like `"8"`, out-of-range `15`, missing `winner`, garbage → `null`.
-- `node --test tests/` passes.
+- `node --test tests/*.test.js` passes.
 
 ### T2 — Page + debate flow (`src/index.html`, `src/app.js`, `tests/app.test.js`)
 - Setup screen per spec: topic, 🎲 (fills topic via `pickTopic`), For/Against
