@@ -58,7 +58,13 @@
     return x !== null && typeof x === 'object' && !Array.isArray(x);
   }
 
-  function buildPersonaPrompt(topic, forText, againstText) {
+  // Keys of the voices a debater may be cast with (hosted site only): a list of {key, description, judge?}.
+  function castable(voices) {
+    if (!Array.isArray(voices)) return [];
+    return voices.filter(function (v) { return isObj(v) && typeof v.key === 'string' && v.key && !v.judge; });
+  }
+
+  function buildPersonaPrompt(topic, forText, againstText, voices) {
     var f = cleanInput(forText, 300);
     var a = cleanInput(againstText, 300);
     var lines = [];
@@ -81,9 +87,19 @@
       lines.push('Invented characters must be contrasting: very different from each other in temperament and style.');
     }
     lines.push('');
+    var cast = castable(voices);
+    if (cast.length) {
+      lines.push('Each character is spoken aloud in a voice. Pick the voice key that best fits each character; the two characters must use different voices. Available voices:');
+      cast.forEach(function (v) { lines.push('- ' + v.key + ': ' + cleanInput(v.description || v.label || '', 120)); });
+      lines.push('');
+    }
     lines.push('Respond with JSON only, in exactly this shape:');
-    lines.push('{"for":{"name":"...","emoji":"...","personality":"..."},"against":{"name":"...","emoji":"...","personality":"..."}}');
-    lines.push('Each name is short (under 40 characters), each emoji is a single emoji, each personality is one or two sentences.');
+    if (cast.length) {
+      lines.push('{"for":{"name":"...","emoji":"...","personality":"...","voice":"<voice key>"},"against":{"name":"...","emoji":"...","personality":"...","voice":"<voice key>"}}');
+    } else {
+      lines.push('{"for":{"name":"...","emoji":"...","personality":"..."},"against":{"name":"...","emoji":"...","personality":"..."}}');
+    }
+    lines.push('Each name is short (under 40 characters), each emoji is a single emoji, each personality is one or two sentences.' + (cast.length ? ' Each voice is one of the keys listed above.' : ''));
     return lines.join('\n');
   }
 
@@ -131,7 +147,7 @@
     return out;
   }
 
-  function normalizePersonas(raw, forText, againstText) {
+  function normalizePersonas(raw, forText, againstText, voices) {
     var user = { for: cleanInput(forText, 300), against: cleanInput(againstText, 300) };
     var out = {};
     ['for', 'against'].forEach(function (side) {
@@ -145,6 +161,18 @@
         personality: user[side] || personality
       };
     });
+    var cast = castable(voices).map(function (v) { return v.key; });
+    if (cast.length) {
+      var picked = {};
+      ['for', 'against'].forEach(function (side) {
+        var r = isObj(raw) && isObj(raw[side]) ? raw[side] : {};
+        var want = typeof r.voice === 'string' ? r.voice : '';
+        var ok = cast.indexOf(want) >= 0 && !(side === 'against' && want === picked['for']);
+        var key = ok ? want : (cast.filter(function (k) { return k !== picked['for']; })[0] || cast[0]);
+        picked[side] = key;
+        out[side].voice = key;
+      });
+    }
     return out;
   }
 

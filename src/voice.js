@@ -12,10 +12,22 @@
   };
   var MAX_CHUNK = 200;
 
-  function isSupported() {
+  // Hosted site only: the Worker injects DebateHost, whose speak(text, voiceKey) plays ElevenLabs audio
+  // and resolves 'played' | 'cancelled' | 'failed' (never rejects). Absent on claude.ai.
+  var HOST_CHUNK = 1400;
+  function hostPresent() { var H = G.DebateHost; return !!(H && typeof H.speak === 'function'); }
+  function hostUsable() {
+    var H = G.DebateHost;
+    if (!hostPresent()) return false;
+    try { return typeof H.ttsEnabled !== 'function' || !!H.ttsEnabled(); } catch (e) { return false; }
+  }
+
+  function browserSupported() {
     return typeof G.speechSynthesis !== 'undefined' && !!G.speechSynthesis &&
       typeof G.SpeechSynthesisUtterance === 'function';
   }
+
+  function isSupported() { return browserSupported() || hostPresent(); }
 
   function langOf(v) { return String((v && v.lang) || '').toLowerCase().replace(/_/g, '-'); }
 
@@ -91,11 +103,52 @@
   }
 
   // Resolves when done, errored, cancelled or timed out. Never rejects.
+  // opts.voice (hosted site): ElevenLabs voice key for this speaker; on any failure the rest of the
+  // turn is spoken with the built-in browser voices instead.
   function speak(text, speaker, opts) {
+    var key = (opts && typeof opts.voice === 'string' && opts.voice) || (speaker === 'judge' ? 'judge' : '');
+    if (key && hostUsable()) return speakHosted(text, speaker, opts, key);
+    return speakBrowser(text, speaker, opts, epoch);
+  }
+
+  function speakHosted(text, speaker, opts, key) {
+    return new Promise(function (resolve) {
+      var parts = chunk(text, HOST_CHUNK);
+      var myEpoch = epoch;
+      var i = 0;
+      function fallback() {
+        speakBrowser(parts.slice(i).join(' '), speaker, opts, myEpoch).then(resolve, resolve);
+      }
+      function next() {
+        if (myEpoch !== epoch) { resolve(); return; }
+        if (i >= parts.length) { resolve(); return; }
+        if (!hostUsable()) { fallback(); return; }
+        var part = parts[i], settled = false, timer;
+        function done(r) {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (myEpoch !== epoch || r === 'cancelled') { resolve(); return; }
+          if (r === 'failed') { fallback(); return; }
+          i++;
+          next();
+        }
+        // Backstop only: the host has its own timers.
+        timer = setTimeout(function () {
+          try { if (typeof G.DebateHost.cancel === 'function') G.DebateHost.cancel(); } catch (e) { /* ignore */ }
+          done('failed');
+        }, timeoutMs(part) + 30000);
+        try { Promise.resolve(G.DebateHost.speak(part, key)).then(done, function () { done('failed'); }); }
+        catch (e) { done('failed'); }
+      }
+      next();
+    });
+  }
+
+  function speakBrowser(text, speaker, opts, myEpoch) {
     return new Promise(function (resolve) {
       var chunks = chunk(text);
-      if (!chunks.length || !isSupported()) { resolve(); return; }
-      var myEpoch = epoch;
+      if (!chunks.length || !browserSupported() || myEpoch !== epoch) { resolve(); return; }
       var finished = false, timer = null, idx = 0;
       var settings;
       try { settings = assignVoices(loadVoices(), pageLang())[PRESETS[speaker] ? speaker : 'for']; }
@@ -143,7 +196,8 @@
   // Call synchronously inside a click handler: iOS Safari (and some Chrome builds) only let a page
   // speak after speech was started from a user gesture, and real turns are spoken much later.
   function prime() {
-    if (!isSupported()) return;
+    if (hostPresent() && typeof G.DebateHost.prime === 'function') { try { G.DebateHost.prime(); } catch (e) { /* ignore */ } }
+    if (!browserSupported()) return;
     try { if (typeof G.speechSynthesis.resume === 'function') G.speechSynthesis.resume(); } catch (e) { /* ignore */ }
     loadVoices();
     try {
@@ -157,7 +211,8 @@
     epoch++;
     var fns = pending.slice();
     pending = [];
-    if (isSupported()) { try { G.speechSynthesis.cancel(); } catch (e) { /* ignore */ } }
+    if (hostPresent() && typeof G.DebateHost.cancel === 'function') { try { G.DebateHost.cancel(); } catch (e) { /* ignore */ } }
+    if (browserSupported()) { try { G.speechSynthesis.cancel(); } catch (e) { /* ignore */ } }
     fns.forEach(function (f) { f(); });
   }
 

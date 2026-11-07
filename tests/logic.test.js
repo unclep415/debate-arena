@@ -281,3 +281,44 @@ test('final review: judge prompt example is valid JSON in range and ties winner 
   assert.doesNotMatch(L.buildJudgePrompt('T', { for: { name: 'A' }, against: { name: 'B' } }, []), /\(\)/);
 });
 
+
+// ---- hosted voice casting (optional 4th argument; claude.ai never passes it) ----
+const VOICES_ = [
+  { key: 'callum', description: 'husky trickster' }, { key: 'lily', description: 'velvety actress' },
+  { key: 'harry', description: 'fierce warrior' }, { key: 'bill', description: 'old judge', judge: true },
+];
+test('persona prompt without voices is unchanged (no voice key requested)', () => {
+  const p = L.buildPersonaPrompt('t', '', '');
+  assert.ok(!/voice/i.test(p));
+  assert.strictEqual(p, L.buildPersonaPrompt('t', '', '', undefined));
+  assert.strictEqual(p, L.buildPersonaPrompt('t', '', '', []));
+});
+test('persona prompt with voices lists castable keys (not the judge) and asks for a voice per debater', () => {
+  const p = L.buildPersonaPrompt('t', '', '', VOICES_);
+  assert.match(p, /- callum: husky trickster/);
+  assert.match(p, /- harry: fierce warrior/);
+  assert.ok(!/- bill:/.test(p));
+  assert.match(p, /"voice":"<voice key>"/);
+});
+test('normalizePersonas without voices adds no voice field', () => {
+  const r = L.normalizePersonas({ for: { name: 'A', voice: 'callum' }, against: { name: 'B' } }, '', '');
+  assert.ok(!('voice' in r.for) && !('voice' in r.against));
+});
+test('normalizePersonas keeps valid distinct voice keys', () => {
+  const r = L.normalizePersonas({ for: { name: 'A', voice: 'harry' }, against: { name: 'B', voice: 'lily' } }, '', '', VOICES_);
+  assert.strictEqual(r.for.voice, 'harry'); assert.strictEqual(r.against.voice, 'lily');
+});
+test('normalizePersonas replaces invalid/missing/judge voices with distinct defaults; For differs from Against', () => {
+  for (const raw of [null, {}, { for: { voice: 'nope' }, against: { voice: 7 } }, { for: { voice: 'bill' }, against: { voice: 'bill' } },
+    { for: { voice: 'lily' }, against: { voice: 'lily' } }, { for: { voice: '__proto__' }, against: { voice: 'toString' } }]) {
+    const r = L.normalizePersonas(raw, '', '', VOICES_);
+    for (const side of ['for', 'against']) assert.ok(['callum', 'lily', 'harry'].includes(r[side].voice), JSON.stringify(raw));
+    assert.notStrictEqual(r.for.voice, r.against.voice, JSON.stringify(raw));
+  }
+  const dup = L.normalizePersonas({ for: { voice: 'lily' }, against: { voice: 'lily' } }, '', '', VOICES_);
+  assert.strictEqual(dup.for.voice, 'lily');
+});
+test('normalizePersonas with a single castable voice still returns it for both', () => {
+  const r = L.normalizePersonas(null, 'a', 'b', [{ key: 'x', description: 'd' }]);
+  assert.strictEqual(r.for.voice, 'x'); assert.strictEqual(r.against.voice, 'x');
+});

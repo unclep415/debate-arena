@@ -42,10 +42,10 @@
   }
   function cancelSpeech() { if (voiceSupported) V.cancel(); }
   // Speak only for the current, un-stopped run; resolves when speech ends or is cancelled.
-  async function say(id, text, speaker, name) {
+  async function say(id, text, speaker, name, voice) {
     if (!voiceOn || !voiceSupported || aborted(id)) return;
     setStatus(name + ' is speaking aloud…');
-    await V.speak(text, speaker);
+    await V.speak(text, speaker, voice ? { voice: voice } : undefined);
   }
 
   function showBanner(msg) { els.banner.textContent = msg; els.banner.hidden = false; }
@@ -106,15 +106,23 @@
     if (!err || !((err.code === 'rate_limited' && err.daily) || err.code === 'session_expired' || err.code === 'cancelled')) hostStart = false;
   }
 
+  // Hosted site only: the curated voice list ([] when unavailable or when premium voices are off).
+  async function getVoices() {
+    var H = globalThis.DebateHost;
+    if (!H || typeof H.voices !== 'function') return [];
+    try { var v = await H.voices(); return Array.isArray(v) ? v : []; } catch (e) { return []; }
+  }
+
   async function getPersonas(topic, forText, againstText) {
-    if (forText && againstText) return L.normalizePersonas(null, forText, againstText);
+    var voices = await getVoices();
+    if (forText && againstText) return L.normalizePersonas(null, forText, againstText, voices);
     controller = new AbortController();
     var raw;
     try {
-      raw = await sample.json(L.buildPersonaPrompt(topic, forText, againstText), startOpts({ signal: controller.signal, cache: false }));
+      raw = await sample.json(L.buildPersonaPrompt(topic, forText, againstText, voices), startOpts({ signal: controller.signal, cache: false }));
     } catch (e) { startSettled(e); throw e; }
     startSettled(null);
-    return L.normalizePersonas(raw, forText, againstText);
+    return L.normalizePersonas(raw, forText, againstText, voices);
   }
 
   function endDebate(msg) {
@@ -302,7 +310,7 @@
       bubble.text.classList.remove('cursor');
       transcript.push({ side: turn.side, round: turn.round, name: persona.name, text: text });
       if (isAbort()) return stopOrStale();
-      await say(myRun, text, turn.side, persona.name);
+      await say(myRun, text, turn.side, persona.name, persona.voice);
       if (isAbort()) return stopOrStale();
     }
 

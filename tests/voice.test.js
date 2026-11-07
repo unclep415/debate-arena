@@ -184,3 +184,97 @@ test('voices that load late (voiceschanged) are used; empty list is not locked i
   assert.equal(utts[1].voice && utts[1].voice.name, 'Late');
   utts[1].onend({}); await p;
 });
+
+// ---- hosted engine delegation (globalThis.DebateHost, injected by the Worker on the hosted site only) ----
+function fakeHost(over = {}) {
+  const h = { calls: [], cancels: 0, primes: 0, enabled: true, results: [],
+    speak(text, voice) { h.calls.push({ text, voice }); return Promise.resolve(h.results.length ? h.results.shift() : 'played'); },
+    cancel() { h.cancels++; }, prime() { h.primes++; }, ttsEnabled() { return h.enabled; } };
+  Object.assign(h, over);
+  globalThis.DebateHost = h;
+  return h;
+}
+const { afterEach } = require('node:test');
+afterEach(() => { delete globalThis.DebateHost; });
+
+test('host engine: speak with a voice key plays via DebateHost, no browser utterance', async () => {
+  const h = fakeHost();
+  await V.speak('Hello there.', 'for', { voice: 'callum' });
+  assert.deepEqual(h.calls, [{ text: 'Hello there.', voice: 'callum' }]);
+  assert.equal(utts.length, 0);
+});
+
+test('host engine: judge speaker defaults to the judge voice key', async () => {
+  const h = fakeHost();
+  await V.speak('Order.', 'judge');
+  assert.equal(h.calls[0].voice, 'judge');
+});
+
+test('host engine: no voice key (or engine disabled) uses browser speech', async () => {
+  const h = fakeHost();
+  let p = V.speak('Plain.', 'for'); await tick();
+  assert.equal(h.calls.length, 0); assert.equal(utts.length, 1); utts[0].onend({}); await p;
+  h.enabled = false;
+  p = V.speak('Off.', 'for', { voice: 'callum' }); await tick();
+  assert.equal(h.calls.length, 0); assert.equal(utts.length, 2); utts[1].onend({}); await p;
+});
+
+test('host engine: long text is split into <=1400 char requests played in order', async () => {
+  const h = fakeHost();
+  const text = ('This is a sentence of moderate length. ').repeat(100);
+  await V.speak(text, 'against', { voice: 'lily' });
+  assert.ok(h.calls.length >= 3);
+  h.calls.forEach((c) => assert.ok(c.text.length <= 1400));
+  assert.equal(h.calls.map((c) => c.text).join(' ').replace(/\s+/g, ' ').trim(), text.replace(/\s+/g, ' ').trim());
+});
+
+test('host engine: failed clip falls back to browser speech for the rest of the turn', async () => {
+  const h = fakeHost();
+  h.results = ['played', 'failed'];
+  const text = ('Sentence number one is here. ').repeat(80);
+  const p = V.speak(text, 'for', { voice: 'harry' });
+  await tick(); await tick();
+  assert.equal(h.calls.length, 2);
+  assert.ok(utts.length >= 1, 'browser speech took over');
+  assert.ok(utts[0].text.length > 0);
+  const t = setInterval(() => { utts.forEach((u) => u.onend && u.onend({})); }, 2);
+  await p; clearInterval(t);
+});
+
+test('host engine: speak never rejects when the host throws or rejects', async () => {
+  fakeHost({ speak() { throw new Error('boom'); } });
+  const p = V.speak('Hi.', 'for', { voice: 'callum' }); await tick();
+  utts.forEach((u) => u.onend && u.onend({}));
+  await p;
+  fakeHost({ speak() { return Promise.reject(new Error('no')); } });
+  const q = V.speak('Hi.', 'for', { voice: 'callum' }); await tick(); await tick();
+  utts.forEach((u) => u.onend && u.onend({}));
+  await q;
+});
+
+test('host engine: cancel stops the host and ends a pending speak; remaining chunks are not played', async () => {
+  let release;
+  const h = fakeHost({ speak(text, voice) { h.calls.push({ text, voice }); return new Promise((r) => { release = r; }); } });
+  const p = V.speak(('A fairly long sentence goes here. ').repeat(80), 'for', { voice: 'callum' });
+  await tick();
+  V.cancel();
+  assert.equal(h.cancels, 1);
+  release('cancelled');
+  await p;
+  assert.equal(h.calls.length, 1);
+  assert.equal(utts.length, 0);
+});
+
+test('host engine: prime primes the host audio inside the call and still primes browser speech', () => {
+  const h = fakeHost();
+  V.prime();
+  assert.equal(h.primes, 1);
+  assert.equal(utts.length, 1);
+});
+
+test('host engine: isSupported is true with only the host, false with nothing', () => {
+  delete globalThis.speechSynthesis;
+  assert.equal(V.isSupported(), false);
+  fakeHost();
+  assert.equal(V.isSupported(), true);
+});

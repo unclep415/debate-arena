@@ -2,6 +2,7 @@
 import { COOKIE_NAME, constantTimeEqual, createLimiter, makeToken, readCookie, sessionCookie, verifyToken } from "./session.js";
 import { handleSample, jsonError, validateInput } from "./sample.js";
 import { parseLimit, utcDate } from "./cap.js";
+import { handleTts, handleVoices } from "./tts.js";
 import { isHtmlEntry, rewriteHtmlResponse } from "./inject.js";
 
 export { DailyCap } from "./cap.js";
@@ -11,6 +12,8 @@ const CAP_MESSAGE = "Daily debate limit reached — try again tomorrow.";
 // Server-side backstop: debateStart is client-controlled, so every /api/sample call also counts
 // against a coarse per-day call budget (a debate is ~8 calls; the rest leaves room for retries).
 export const CALLS_PER_DEBATE = 10;
+// Same idea for /api/tts: a debate is 7 spoken clips (long turns are split into a few requests each).
+export const TTS_PER_DEBATE = 16;
 const TEXT_TYPES = /^(text\/html|text\/css|text\/javascript|application\/javascript)\b/i;
 
 // Static text assets must declare UTF-8 (index.html has no <meta charset>; the JS has emoji).
@@ -74,6 +77,14 @@ async function postSample(request, env) {
   return handleSample(body, env);
 }
 
+async function postTts(request, env) {
+  if (request.method !== "POST") return jsonError(405, "invalid_request", "Method not allowed.");
+  try {
+    if (!(await takeSlot(env, "global-tts", parseLimit(env.DAILY_CAP) * TTS_PER_DEBATE))) return jsonError(429, "rate_limited", "Premium voices are out of credits for today.");
+  } catch { return jsonError(503, "unavailable", "Usage counter unavailable. Please try again."); }
+  return handleTts(request, env);
+}
+
 async function handleApi(request, env, path) {
   if (path === "/api/session") {
     if (request.method === "POST") return postSession(request, env);
@@ -84,6 +95,8 @@ async function handleApi(request, env, path) {
   }
   if (!(await isGranted(request, env))) return jsonError(401, "not_granted", "Passcode required.");
   if (path === "/api/sample") return postSample(request, env);
+  if (path === "/api/tts") return postTts(request, env);
+  if (path === "/api/voices") return request.method === "GET" ? handleVoices() : jsonError(405, "invalid_request", "Method not allowed.");
   return jsonError(404, "invalid_request", "Not found.");
 }
 

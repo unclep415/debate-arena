@@ -44,6 +44,15 @@ debater, and the judge reads the verdict. The next turn starts only after the
 current one has been spoken. Turning it off, Stop or New debate cancels speech
 at once. The toggle is hidden if the browser has no `speechSynthesis`.
 
+**Premium voices (hosted site only)**: on the Cloudflare-hosted version the toggle plays
+ElevenLabs voices instead (`POST /api/tts`, model `eleven_flash_v2_5`, `mp3_22050_32`; the
+key is the Worker secret `ELEVENLABS_API_KEY`). Claude casts a voice per debater from the
+12 curated premade voices in `worker/voices.js`; Bill is always the judge. If a clip fails
+for any reason, that turn is spoken with the built-in browser voices; after a quota
+(`insufficient_credits`) or retired-voice failure ElevenLabs is skipped for the rest of the
+page session. The premade voices retire 2026-12-31 and the free plan has about 10k
+credits/month. The claude.ai artifact never uses any of this.
+
 ## Files
 
 - `src/index.html` — markup and styles (light and dark themes); loads the two scripts.
@@ -51,6 +60,7 @@ at once. The toggle is hidden if the browser has no `speechSynthesis`.
   (`buildPersonaPrompt`, `buildTurnPrompt`, `buildJudgePrompt`), persona and
   verdict normalization. Works in the browser and in Node.
 - `src/voice.js` — text-to-speech wrapper (`DebateVoice`: voice assignment, `speak`, `cancel`).
+- `worker/tts.js`, `worker/voices.js` — hosted `/api/tts` and `/api/voices`; `src/hosted.js` — hosted-only adapter and audio engine.
 - `src/app.js` — DOM wiring and the debate engine (all `sample` calls).
 - `tests/logic.test.js` — unit tests for `logic.js`.
 - `tests/voice.test.js`, `tests/app-voice.test.js` — voice unit and Playwright tests.

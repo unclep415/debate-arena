@@ -167,7 +167,101 @@
     return r.json;
   };
 
+
+  // ---------- premium voices (ElevenLabs via /api/tts) ----------
+  // speak(text, voiceKey) resolves 'played' | 'cancelled' | 'failed' and never rejects or hangs; the
+  // caller (voice.js) speaks the turn with browser voices on 'failed'. After a quota or missing-voice
+  // failure the engine switches itself off for the rest of the page session.
+  var SILENT = 'data:audio/wav;base64,UklGRuwAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YcgAAACAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgA==';
+  var FETCH_MS = 20000;
+  var ttsOff = false, ttsEpoch = 0, current = null, audio = null, voiceList = null;
+
+  function ensureAudio() {
+    if (!audio) audio = new Audio();
+    return audio;
+  }
+
+  // Call synchronously inside a click: playing a silent clip unlocks this element for later turns.
+  function primeAudio() {
+    if (ttsOff) return;
+    try {
+      var a = ensureAudio();
+      a.src = SILENT;
+      var p = a.play();
+      if (p && typeof p.catch === 'function') p.catch(function () {});
+    } catch (e) { /* ignore */ }
+  }
+
+  function cancelSpeech() {
+    ttsEpoch++;
+    if (current) current.finish('cancelled');
+  }
+
+  function speakTts(text, voice) {
+    return new Promise(function (resolve) {
+      if (ttsOff) { resolve('failed'); return; }
+      var epoch = ttsEpoch, done = false, timer = null, url = null, a;
+      var ctl = typeof AbortController === 'function' ? new AbortController() : null;
+      var me = { finish: finish };
+      function finish(result) {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        if (current === me) current = null;
+        if (a) { a.onended = null; a.onerror = null; try { a.pause(); } catch (e) {} }
+        if (url) { try { URL.revokeObjectURL(url); } catch (e) {} url = null; }
+        if (ctl) { try { ctl.abort(); } catch (e) {} }
+        resolve(result);
+      }
+      if (current) current.finish('cancelled');
+      current = me;
+      timer = setTimeout(function () { finish('failed'); }, FETCH_MS);
+      try { a = ensureAudio(); } catch (e) { finish('failed'); return; }
+      fetch('/api/tts', {
+        method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin',
+        body: JSON.stringify({ text: text, voice: voice }), signal: ctl ? ctl.signal : undefined
+      }).then(function (res) {
+        if (done) return null;
+        if (res.ok) return res.blob();
+        return res.json().catch(function () { return {}; }).then(function (b) {
+          // Out of credits (rate_limited) or a retired voice: stop asking for the rest of this page session.
+          if (b && (b.code === 'rate_limited' || b.code === 'voice_not_found')) ttsOff = true;
+          finish('failed');
+          return null;
+        });
+      }).then(function (blob) {
+        if (done || !blob) return;
+        if (epoch !== ttsEpoch) { finish('cancelled'); return; }
+        url = URL.createObjectURL(blob);
+        a.onended = function () { finish('played'); };
+        a.onerror = function () { finish('failed'); };
+        clearTimeout(timer);
+        var words = String(text).split(/\s+/).filter(Boolean).length;
+        // Generous: if neither `ended` nor `error` ever fires, treat it as played rather than hang.
+        timer = setTimeout(function () { finish('played'); }, Math.round((words / 2.5 + 15) * 1000));
+        a.src = url;
+        var p = a.play();
+        if (p && typeof p.catch === 'function') p.catch(function () { finish('failed'); });
+      }).catch(function () { finish(epoch !== ttsEpoch ? 'cancelled' : 'failed'); });
+    });
+  }
+
+  // Curated voices for casting, fetched once. [] when unavailable or after premium voices went off,
+  // so the persona prompt then asks for no voice keys.
+  function getVoiceList() {
+    if (ttsOff) return Promise.resolve([]);
+    if (voiceList) return Promise.resolve(voiceList);
+    return fetch('/api/voices', { credentials: 'same-origin' }).then(function (res) {
+      return res.ok ? res.json() : null;
+    }).then(function (b) {
+      if (b && Array.isArray(b.voices)) voiceList = b.voices;
+      return voiceList || [];
+    }, function () { return []; });
+  }
+
   globalThis.DebateHost = {
+    speak: speakTts, cancel: cancelSpeech, prime: primeAudio, voices: getVoiceList,
+    ttsEnabled: function () { return !ttsOff; },
     sample: function () {
       return fetch('/api/session', { credentials: 'same-origin' }).then(function (res) {
         return res.status === 401 ? askPasscode() : undefined;
