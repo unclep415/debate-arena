@@ -130,3 +130,30 @@ Whole-app review (security, spec coverage, mobile layout), then publish
 Lead plans and verifies; one Sonnet builder per task (tests first); an Opus
 reviewer gates each task and fixes issues with tests. Commits are local only
 (no remote). Builders and reviewers do not edit `docs/`.
+
+### T5 — Voice (text-to-speech) (`src/voice.js`, `src/app.js`, `src/index.html`, tests)
+Browser Web Speech API (`window.speechSynthesis`, `SpeechSynthesisUtterance`) only; no network.
+- `src/voice.js` (classic script, exposes `globalThis.DebateVoice`; Node `module.exports` for unit tests):
+  - `isSupported()` → boolean.
+  - `assignVoices(voices, lang)` → `{for, against, judge}` each `{voice|null, pitch, rate}`: prefer
+    distinct voices matching the page language (`navigator.language` prefix, fallback `en`);
+    if fewer than 3 distinct voices, differentiate by pitch/rate (judge low & slow, e.g. pitch 0.8
+    rate 0.9; For 1.1/1.05; Against 0.95/1.1 — distinct combos). Pure, unit-tested.
+  - `speak(text, speaker)` → Promise resolving when the utterance ends (or errors/cancels — never
+    rejects, never hangs: also resolve on `error`, and on `cancel()`). Voices may load async
+    (`voiceschanged`); assign lazily on first speak.
+  - `cancel()` → stops all speech and resolves any pending `speak` promise.
+- UI: a 🔊 Voice toggle (a real button with `aria-pressed`) on the setup screen and in the debate
+  toolbar, kept in sync; default off; persisted in `localStorage` wrapped in try/catch (page must
+  work if storage throws). Hidden entirely when `isSupported()` is false.
+- Flow: when on, after each turn finishes streaming, speak it in that speaker's voice and await it
+  before starting the next turn. The verdict is spoken by the judge: "Winner: <name>." (or "It's a
+  tie.") then the reasoning. Turning voice off mid-speech cancels speech and the debate continues
+  as text. Stop, New debate and a superseded run cancel speech immediately; a superseded run must
+  never speak. Status line shows "<name> is speaking aloud…" while speaking.
+- Acceptance (Playwright with a fake `speechSynthesis` installed via addInitScript, recording
+  utterances and letting tests end them): voice off → zero utterances and same behavior as before;
+  voice on → 7 utterances in order (6 turns + verdict) and turn N+1's model call does not start
+  until utterance N ends; toggling off mid-utterance cancels and the debate completes; Stop cancels
+  speech; no speechSynthesis → toggle hidden, debate works; storage throwing → page still works;
+  toggle state persists across reload; no horizontal scroll at 375px. Unit tests for assignVoices.
