@@ -204,10 +204,14 @@ test('normalizeVerdict coercion, clamp, derive winner', () => {
 test('normalizeVerdict winner handling', () => {
   const s = { for: { logic: 5, persuasion: 5, character: 5 }, against: { logic: 9, persuasion: 9, character: 9 } };
   assert.strictEqual(L.normalizeVerdict({ scores: s, winner: 'banana' }).winner, 'against');
-  assert.strictEqual(L.normalizeVerdict({ scores: s, winner: 'tie' }).winner, 'tie');
-  assert.strictEqual(L.normalizeVerdict({ scores: s, winner: 'for' }).winner, 'for');
+  // totals differ: they decide, even against a contradictory winner
+  assert.strictEqual(L.normalizeVerdict({ scores: s, winner: 'tie' }).winner, 'against');
+  assert.strictEqual(L.normalizeVerdict({ scores: s, winner: 'for' }).winner, 'against');
   const eq = { for: { logic: 5, persuasion: 5, character: 5 }, against: { logic: 5, persuasion: 5, character: 5 } };
   assert.strictEqual(L.normalizeVerdict({ scores: eq }).winner, 'tie');
+  // equal totals: the judge's valid call breaks the tie
+  assert.strictEqual(L.normalizeVerdict({ scores: eq, winner: 'against' }).winner, 'against');
+  assert.strictEqual(L.normalizeVerdict({ scores: eq, winner: 'nope' }).winner, 'tie');
   assert.strictEqual(L.normalizeVerdict({ scores: eq, reasoning: 42 }).reasoning, '');
 });
 
@@ -237,7 +241,7 @@ test('review fix: emoji must be an emoji; ZWJ, flags, skin tone, keycap kept who
 
 test('review fix: winner is case/space-insensitive', () => {
   const sc = { logic: 1, persuasion: 1, character: 1 };
-  const v = L.normalizeVerdict({ scores: { for: sc, against: { logic: 9, persuasion: 9, character: 9 } }, winner: ' For ' });
+  const v = L.normalizeVerdict({ scores: { for: sc, against: sc }, winner: ' For ' });
   assert.strictEqual(v.winner, 'for');
 });
 
@@ -250,3 +254,30 @@ test('review fix: turn prompt has no double period and ends with a constraint re
   assert.match(last, /AGAINST/);
   assert.match(last, /120 words/);
 });
+
+test('final review: turn prompt bans markdown/name labels, names the opponent, pushes real rebuttal', () => {
+  const t = [{ side: 'for', round: 'Opening', text: 'x' }, { side: 'against', round: 'Opening', text: 'y' }];
+  const c = L.buildTurnPrompt(personas.for, 'for', 'Rebuttal', 'T', t, personas)[0].content;
+  assert.match(c, /no markdown/i);
+  assert.match(c, /do not start with your name/i);
+  assert.match(c, /your opponent, Sir Soup, is arguing AGAINST/);
+  assert.match(c, /say why they are wrong/i);
+  assert.match(c, /do not just repeat/i);
+  const o = L.buildTurnPrompt(personas.against, 'against', 'Opening', 'T', t.slice(0, 1), personas)[0].content;
+  assert.match(o, /quick jab/);
+  const first = L.buildTurnPrompt(personas.for, 'for', 'Opening', 'T', [], personas)[0].content;
+  assert.doesNotMatch(first, /quick jab/);
+});
+
+test('final review: judge prompt example is valid JSON in range and ties winner to totals', () => {
+  const p = L.buildJudgePrompt('T', personas, []);
+  const ex = p.split('\n').find((l) => l.startsWith('{"scores"'));
+  const j = JSON.parse(ex);
+  const v = L.normalizeVerdict(j);
+  assert.ok(v);
+  for (const side of ['for', 'against']) for (const k of ['logic', 'persuasion', 'character']) assert.strictEqual(v.scores[side][k], j.scores[side][k]);
+  assert.match(p, /higher total/);
+  assert.match(p, /not which side you agree with/);
+  assert.doesNotMatch(L.buildJudgePrompt('T', { for: { name: 'A' }, against: { name: 'B' } }, []), /\(\)/);
+});
+

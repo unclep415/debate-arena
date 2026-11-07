@@ -181,34 +181,41 @@
       ', a character in a lighthearted debate. Your personality: ' +
       String(p.personality || 'a spirited debater').replace(/[.!?\s]+$/, '') + '.');
     lines.push('The debate topic is: "' + topic + '"');
-    lines.push('You are arguing ' + stance + ' the topic.');
+    var oppSide = side === 'against' ? 'for' : 'against';
+    var opp = personas && personas[oppSide] && personas[oppSide].name;
+    lines.push('You are arguing ' + stance + ' the topic' +
+      (opp ? '; your opponent, ' + opp + ', is arguing ' + oppSide.toUpperCase() + ' it.' : '.'));
     lines.push('This is the ' + rname + ' round. ' + (ROUND_GOALS[rname] || ''));
     if (rname !== 'Opening') {
-      lines.push('Respond directly to your opponent\'s specific points, quoting or paraphrasing what they actually said.');
+      lines.push('Respond directly to your opponent\'s specific points, quoting or paraphrasing what they actually said, and say why they are wrong. Do not just repeat your earlier arguments.');
+    } else if (transcript && transcript.length) {
+      lines.push('You may take one quick jab at what your opponent just said, but mostly make your own case.');
     }
-    lines.push('Stay in character the whole time. Use at most ~120 words. Write plain flowing prose with no headings or bullet lists. Output only your speech.');
+    lines.push('Stay in character the whole time. Use at most ~120 words. Write plain flowing prose with no headings or bullet lists and no markdown (no asterisks, no bold, no stage directions). Do not start with your name or a label. Output only your speech.');
     var t = formatTranscript(transcript, personas);
     lines.push('');
     lines.push(t ? 'Debate so far:\n\n' + t : 'The debate so far: nothing yet, you speak first.');
     lines.push('');
     lines.push('Now give your ' + rname + ' speech as ' + (p.name || DEFAULTS[side === 'against' ? 'against' : 'for'].name) +
-      ', arguing ' + stance + ' the topic: in character, at most ~120 words, plain prose with no headings or bullet lists.');
+      ', arguing ' + stance + ' the topic: in character, at most ~120 words, plain prose with no headings, bullet lists or markdown.');
     return [{ role: 'user', content: lines.join('\n') }];
   }
 
   function buildJudgePrompt(topic, personas, transcript) {
     var f = personas.for, a = personas.against;
     var lines = [];
-    lines.push('You are a weary Supreme Court justice judging a lighthearted debate. Be dry and fair.');
+    lines.push('You are a weary Supreme Court justice judging a lighthearted debate. Be dry and fair: judge how well each debater argued their assigned side, not which side you agree with.');
     lines.push('Topic: "' + topic + '"');
-    lines.push('FOR: ' + f.name + ' (' + (f.personality || '') + ')');
-    lines.push('AGAINST: ' + a.name + ' (' + (a.personality || '') + ')');
+    lines.push('FOR: ' + f.name + (f.personality ? ' (' + f.personality + ')' : ''));
+    lines.push('AGAINST: ' + a.name + (a.personality ? ' (' + a.personality + ')' : ''));
     lines.push('');
     lines.push('Transcript:\n\n' + formatTranscript(transcript, personas));
     lines.push('');
-    lines.push('Score each debater from 1 to 10 (integers) on logic, persuasion, and character (staying in persona).');
-    lines.push('Respond with JSON only, in exactly this shape:');
-    lines.push('{"scores":{"for":{"logic":0,"persuasion":0,"character":0},"against":{"logic":0,"persuasion":0,"character":0}},"winner":"for"|"against"|"tie","reasoning":"..."}');
+    lines.push('Score each debater from 1 to 10 (integers) on: logic (how sound and well supported their arguments were), persuasion (how convincing they were, including how well they answered their opponent\'s actual points), and character (how well they stayed in persona).');
+    lines.push('The winner is the side with the higher total score; use "tie" only if the totals are equal.');
+    lines.push('Respond with JSON only, in exactly this shape (replace the example numbers with your own scores):');
+    lines.push('{"scores":{"for":{"logic":7,"persuasion":6,"character":8},"against":{"logic":5,"persuasion":7,"character":6}},"winner":"for","reasoning":"..."}');
+    lines.push('"winner" must be exactly "for", "against" or "tie".');
     lines.push('Reasoning must be at most 3 sentences, in the voice of the weary justice.');
     return lines.join('\n');
   }
@@ -234,9 +241,13 @@
       scores[sides[i]] = { logic: l, persuasion: p, character: c };
       totals[sides[i]] = l + p + c;
     }
+    // The scorecard must never crown the lower total: when totals differ they decide;
+    // when they are equal the judge's valid call breaks the tie (else "tie").
     var winner = typeof raw.winner === 'string' ? raw.winner.trim().toLowerCase() : raw.winner;
-    if (winner !== 'for' && winner !== 'against' && winner !== 'tie') {
-      winner = totals.for > totals.against ? 'for' : totals.against > totals.for ? 'against' : 'tie';
+    if (totals.for !== totals.against) {
+      winner = totals.for > totals.against ? 'for' : 'against';
+    } else if (winner !== 'for' && winner !== 'against' && winner !== 'tie') {
+      winner = 'tie';
     }
     return {
       scores: scores,
