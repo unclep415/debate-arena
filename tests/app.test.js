@@ -29,6 +29,7 @@ async function open(cfg = {}, viewport) {
       if (opts.signal && opts.signal.aborted) throw abortErr();
       await sleep(cfg.delay || 10);
       if (opts.onText) opts.onText({ text: text.slice(0, half), delta: text.slice(0, half) });
+      if (cfg.failAt === idx) throw { code: cfg.failCode || 'internal', message: cfg.failMessage || 'Boom happened', text: text.slice(0, half) };
       if (cfg.hangAt === idx) {
         await new Promise((_, rej) => {
           const fire = () => setTimeout(() => rej(abortErr()), cfg.abortDelay || 0);
@@ -41,8 +42,18 @@ async function open(cfg = {}, viewport) {
       return { text, truncated: false };
     };
     sample.json = async (input, opts = {}) => {
+      if (/Supreme Court/.test(String(input))) {
+        const jx = window.__calls.filter((c) => c.kind === 'judge').length;
+        window.__calls.push({ kind: 'judge', input });
+        if (cfg.judgeHang) await new Promise((_, rej) => opts.signal && opts.signal.addEventListener('abort', () => rej({ code: 'cancelled', message: 'cancelled' })));
+        await sleep(cfg.delay || 10);
+        if (cfg.judgeFail && cfg.judgeFail.at === jx) throw { code: cfg.judgeFail.code, message: 'Judge broke', text: 'x' };
+        const outs = cfg.judgeOut || [{ scores: { for: { logic: 8, persuasion: 7, character: 6 }, against: { logic: 5, persuasion: 5, character: 5 } }, winner: 'for', reasoning: 'For was funnier. Case closed.' }];
+        return outs[Math.min(jx, outs.length - 1)];
+      }
       const jidx = window.__calls.filter((c) => c.kind === 'json').length;
       window.__calls.push({ kind: 'json', input });
+      if (cfg.jsonFailCode) throw { code: cfg.jsonFailCode, message: 'Persona trouble' };
       if (cfg.jsonHang) {
         await new Promise((_, rej) => opts.signal && opts.signal.addEventListener('abort', () => rej({ code: 'cancelled', message: 'cancelled' })));
       }
@@ -283,5 +294,173 @@ test('hidden attribute really hides setup/arena (CSS display must not override i
   await page.click('#newDebate');
   assert.equal(await page.isVisible('#setup'), true);
   assert.equal(await page.isVisible('#arena'), false);
+  await ctx.close();
+});
+
+const GOOD = { scores: { for: { logic: 8, persuasion: 7, character: 6 }, against: { logic: 5, persuasion: 5, character: 5 } }, winner: 'for', reasoning: 'For was funnier. Case closed.' };
+const done = (page) => page.waitForFunction(() => document.querySelectorAll('.bubble').length === 6 && !document.querySelector('#stop:not([hidden])'));
+
+test('happy path shows scorecard with personas, scores, totals, winner, reasoning', async () => {
+  const { page, ctx, errors } = await open();
+  await fillAndStart(page);
+  await page.waitForSelector('.scorecard');
+  await done(page);
+  assert.equal(await calls(page, 'judge'), 1);
+  const judgeInput = await page.evaluate(() => window.__calls.find((c) => c.kind === 'judge').input);
+  assert.match(judgeInput, /Turn 6 text/);
+  const t = await page.$eval('.scorecard', (e) => e.textContent);
+  assert.match(t, /Debater For/); assert.match(t, /Debater Against/); assert.match(t, /🟦/);
+  assert.match(t, /logic/i); assert.match(t, /persuasion/i); assert.match(t, /character/i);
+  assert.match(t, /For was funnier/);
+  assert.equal(await page.$eval('.scorecard [data-side="for"] .total', (e) => e.textContent.trim()), '21');
+  assert.equal(await page.$eval('.scorecard [data-side="against"] .total', (e) => e.textContent.trim()), '15');
+  assert.equal(await page.$$eval('.scorecard .winner', (e) => e.length), 1);
+  assert.equal(await page.$eval('.scorecard .winner', (e) => e.dataset.side), 'for');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('tie shows Tie and highlights nobody', async () => {
+  const tie = { scores: { for: { logic: 5, persuasion: 5, character: 5 }, against: { logic: 6, persuasion: 5, character: 4 } }, winner: 'tie', reasoning: 'Equal.' };
+  const { page, ctx } = await open({ judgeOut: [tie] });
+  await fillAndStart(page);
+  await page.waitForSelector('.scorecard');
+  assert.match(await page.$eval('.scorecard', (e) => e.textContent), /Tie/);
+  assert.equal(await page.$$eval('.scorecard .winner', (e) => e.length), 0);
+  await ctx.close();
+});
+
+test('garbage judge output: fallback + Retry judge (no auto retry), then success', async () => {
+  const { page, ctx } = await open({ judgeOut: [{ nonsense: true }, GOOD] });
+  await fillAndStart(page);
+  await page.waitForSelector('.retry');
+  await page.waitForTimeout(150);
+  assert.equal(await calls(page, 'judge'), 1);
+  assert.match(await page.textContent('#transcript'), /judge couldn.t score this one/i);
+  assert.match(await page.textContent('.retry'), /retry judge/i);
+  assert.equal(await page.$$eval('.scorecard', (e) => e.length), 0);
+  await page.click('.retry');
+  await page.waitForSelector('.scorecard');
+  assert.equal(await calls(page, 'judge'), 2);
+  assert.equal(await page.$$eval('.retry', (e) => e.length), 0);
+  assert.equal(await page.$$eval('.notice', (e) => e.length), 0);
+  await page.waitForSelector('#newDebate:not([hidden])');
+  await ctx.close();
+});
+
+test('judge rejection shows error and Retry judge', async () => {
+  const { page, ctx } = await open({ judgeFail: { at: 0, code: 'rate_limited' } });
+  await fillAndStart(page);
+  await page.waitForSelector('.retry');
+  assert.match(await page.textContent('#transcript'), /wait a moment/i);
+  await page.click('.retry');
+  await page.waitForSelector('.scorecard');
+  await ctx.close();
+});
+
+test('turn 4 failure: partial kept as (cut off), error, Retry finishes with exactly 6 bubbles', async () => {
+  const { page, ctx, errors } = await open({ failAt: 3, failCode: 'rate_limited' });
+  await fillAndStart(page);
+  await page.waitForSelector('.retry');
+  await page.waitForTimeout(150);
+  assert.equal(await calls(page, 'sample'), 4);
+  assert.equal(await page.$$eval('.bubble', (e) => e.length), 4);
+  const t = await page.$eval('.bubble:nth-of-type(4) .text', (e) => e.textContent);
+  assert.match(t, /Turn 4/); assert.match(t, /\(cut off\)/);
+  assert.match(await page.textContent('#transcript'), /wait a moment/i);
+  assert.equal(await page.$$eval('.scorecard', (e) => e.length), 0);
+  await page.click('.retry');
+  await page.waitForSelector('.scorecard');
+  await done(page);
+  assert.equal(await page.$$eval('.bubble', (e) => e.length), 6);
+  assert.equal(await calls(page, 'sample'), 7);
+  assert.equal(await page.$eval('.bubble:nth-of-type(4) .text', (e) => e.textContent), 'Turn 5 text');
+  assert.equal(await page.$$eval('.retry', (e) => e.length), 0);
+  assert.equal(await page.$$eval('.cutoff', (e) => e.length), 0);
+  // retried turn's prompt still holds turns 1-3
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('generic turn failure shows the error message', async () => {
+  const { page, ctx } = await open({ failAt: 1, failMessage: 'Kaboom 42' });
+  await fillAndStart(page);
+  await page.waitForSelector('.retry');
+  assert.match(await page.textContent('#transcript'), /Kaboom 42/);
+  await ctx.close();
+});
+
+test('not_granted on first call: banner, no further calls, no retry', async () => {
+  const { page, ctx } = await open({ failAt: 0, failCode: 'not_granted' });
+  await fillAndStart(page);
+  await page.waitForSelector('#banner:not([hidden])');
+  await page.waitForTimeout(200);
+  assert.match(await page.textContent('#banner'), /permission/i);
+  assert.equal(await calls(page), 1);
+  assert.equal(await page.$$eval('.retry', (e) => e.length), 0);
+  await page.waitForSelector('#newDebate:not([hidden])');
+  assert.equal(await page.isHidden('#stop'), true);
+  await ctx.close();
+});
+
+test('persona failure: error with Retry on setup step, retry continues', async () => {
+  const { page, ctx } = await open({ jsonFailFirst: true });
+  await fillAndStart(page, { f: '' });
+  await page.waitForSelector('#retryPersonas:not([hidden])');
+  assert.equal(await page.isVisible('#setup'), true);
+  await page.waitForTimeout(100);
+  assert.equal(await calls(page, 'json'), 1);
+  await page.click('#retryPersonas');
+  await page.waitForSelector('.scorecard');
+  assert.equal(await calls(page, 'json'), 2);
+  assert.equal(await page.isHidden('#retryPersonas'), true);
+  await ctx.close();
+});
+
+test('persona not_granted: permission banner, no retry button', async () => {
+  const { page, ctx } = await open({ jsonFailCode: 'not_granted' });
+  await fillAndStart(page, { f: '' });
+  await page.waitForSelector('#banner:not([hidden])');
+  assert.match(await page.textContent('#banner'), /permission/i);
+  assert.equal(await page.isHidden('#retryPersonas'), true);
+  await ctx.close();
+});
+
+test('Stop while a retry is offered ends the debate and removes the retry button', async () => {
+  const { page, ctx, errors } = await open({ failAt: 1 });
+  await fillAndStart(page);
+  await page.waitForSelector('.retry');
+  await page.click('#stop');
+  await page.waitForSelector('#newDebate:not([hidden])');
+  assert.equal(await page.$$eval('.retry', (e) => e.length), 0);
+  assert.match(await page.textContent('#status'), /stopped/i);
+  await page.click('#newDebate');
+  await page.click('#start');
+  await page.waitForSelector('.scorecard');
+  assert.equal(await page.$$eval('.retry, .notice', (e) => e.length), 0);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('Stop during judge: no scorecard, stopped, no error', async () => {
+  const { page, ctx, errors } = await open({ judgeHang: true });
+  await fillAndStart(page);
+  await page.waitForFunction(() => window.__calls.some((c) => c.kind === 'judge'));
+  await page.click('#stop');
+  await page.waitForSelector('#newDebate:not([hidden])');
+  await page.waitForTimeout(100);
+  assert.equal(await page.$$eval('.scorecard, .retry', (e) => e.length), 0);
+  assert.match(await page.textContent('#status'), /stopped/i);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('scorecard has no horizontal scroll at 375px', async () => {
+  const long = { scores: GOOD.scores, winner: 'for', reasoning: 'y'.repeat(300) };
+  const { page, ctx } = await open({ judgeOut: [long] }, { width: 375, height: 700 });
+  await fillAndStart(page, { f: 'A'.repeat(40), a: 'B' });
+  await page.waitForSelector('.scorecard');
+  const w = await page.evaluate(() => [document.documentElement.scrollWidth, document.documentElement.clientWidth]);
+  assert.ok(w[0] <= w[1], JSON.stringify(w));
   await ctx.close();
 });
