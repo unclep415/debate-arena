@@ -1,28 +1,30 @@
 # ElevenLabs API notes (AI Debate Arena)
 
-**Source status.** The official docs at `elevenlabs.io` could NOT be fetched: in this session the host did not resolve (`getaddrinfo ENOTFOUND elevenlabs.io`). `elevenlabs.io` must be added to the session's allowed network domains before these notes can be verified page-by-page. Everything below comes from one of two places:
+Re-verified 2026-11-07 against official pages on `elevenlabs.io` (reachable via the agent proxy). Replaces the earlier snippet-only notes.
 
-- **[snippet]** = text returned by a web search restricted to `elevenlabs.io`. The page body was not read, so re-check before relying on it.
-- **UNCONFIRMED** = not found in any official source gathered here. Do not build on it without checking.
+**Legend.** Each fact cites its official URL. **UNCONFIRMED** = not found on an official page we could read. Do not build on UNCONFIRMED items without checking.
 
-Date of research: 2026-11-07.
+**Access note.** `help.elevenlabs.io` is blocked in this session (`connect_rejected`). Help-center pages were read via their mirrors under `elevenlabs.io/docs/help-center/...`. WebFetch cannot resolve `elevenlabs.io`; the pages were fetched with curl.
 
 ---
 
-## 1. Text-to-speech endpoints
+## 1. Streaming TTS endpoint
 
-- **Non-streaming:** `POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}` [snippet: https://elevenlabs.io/docs/api-reference/text-to-speech/convert]
-- **Streaming:** path not confirmed. The stream reference page was not returned by search. Expected form `POST /v1/text-to-speech/{voice_id}/stream` is UNCONFIRMED. Check https://elevenlabs.io/docs/api-reference/text-to-speech/stream.
-- **Auth header:** `xi-api-key: <key>` [snippet: https://elevenlabs.io/docs/eleven-api/resources/errors]
-- **Body JSON fields:** `text`, `model_id`, `voice_settings` [snippet: convert page]. `voice_settings` sub-fields: `stability`, `similarity_boost`, `style`, `use_speaker_boost`, `speed` [snippet: https://elevenlabs.io/docs/developers/guides/cookbooks/text-to-speech/streaming]. Per-request `voice_settings` overrides the voice's stored settings for that request only [snippet: convert page]. Types, ranges and the full field list: UNCONFIRMED.
-- **`output_format` (query param):** format string is `codec_sample_rate_bitrate`. Default `mp3_44100_128` [snippet: convert page]. Low-bandwidth MP3 candidate: **`mp3_22050_32`** [snippet: convert page]. Some high-quality formats are plan-gated [snippet]. `ulaw_8000` is suggested for telephony [snippet: https://elevenlabs.io/blog/text-to-speech-api-integration]. Full allowed-value list: UNCONFIRMED.
-- **Response content type:** for MP3 output `audio/mpeg` is expected but UNCONFIRMED.
-- **Max characters per request:** `eleven_flash_v2_5` up to 40,000 [snippet: help.elevenlabs.io models article]. Other models: see section 2 (conflicting). Global maximum: UNCONFIRMED.
+- **Method and path:** `POST https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream` (path shown in the example at https://elevenlabs.io/docs/api-reference/text-to-speech/stream).
+- **Auth header:** `xi-api-key: <key>` (same page; the header is listed as optional in the reference, but the example sends it and it is required in practice).
+- **Query params:** `output_format` (default `mp3_44100_128`), `optimize_streaming_latency` (deprecated), `enable_logging` (default true; `false` = zero-retention, enterprise only). Source: stream page.
+- **Body fields:** `text`, `model_id`, `voice_settings` (per-request override, applied to that request only), plus optional `language_code`, `previous_text`/`next_text`, `pronunciation_dictionary_locators`, `apply_text_normalization`, and others. Source: https://elevenlabs.io/docs/api-reference/text-to-speech/stream and /convert.
+- **voice_settings sub-fields:** `stability`, `similarity_boost`, `use_speaker_boost`, `style`, `speed`. Source: `settings` object in https://elevenlabs.io/docs/api-reference/voices/search. The per-request type and range list is collapsed on the reference page: UNCONFIRMED.
+- **output_format values:** `codec_sample_rate_bitrate`. Full enum (21 values) from the stream page HTML: `mp3_22050_32`, `mp3_24000_48`, `mp3_44100_32/64/96/128/192`, `opus_48000_32/64/96/128/192`, `pcm_8000/16000/22050/24000/32000/44100/48000`, `ulaw_8000`, `alaw_8000`. Source: https://elevenlabs.io/docs/api-reference/text-to-speech/stream (the docs say "Show 21 enum values").
+  - **Recommended low-bandwidth MP3: `mp3_22050_32`.** Valid per the enum above; the docs' own example of this format is at the same URL.
+  - Gated: MP3 192 kbps needs Creator or above; PCM 44.1 kHz needs Pro or above (same page).
+- **Response content type:** the page says "Streaming audio data" but gives no media type. `audio/mpeg` for MP3: UNCONFIRMED.
+- **Max characters per request:** per model (section 2). Global maximum: not stated.
 
-Example (built from the facts above; verify before use):
+Example (verified against the documented path and parameters; not yet run with a live key):
 
 ```
-curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/VOICE_ID?output_format=mp3_22050_32" \
+curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/VOICE_ID/stream?output_format=mp3_22050_32" \
   -H "xi-api-key: $ELEVENLABS_API_KEY" -H "Content-Type: application/json" \
   -d '{"text":"Order, order!","model_id":"eleven_flash_v2_5"}' --output line.mp3
 ```
@@ -31,76 +33,132 @@ curl -X POST "https://api.elevenlabs.io/v1/text-to-speech/VOICE_ID?output_format
 
 ## 2. Models
 
-Recommended for low-latency, expressive speech:
+Source for the table: https://elevenlabs.io/docs/overview/models (sections "Flagship models", "Character limits", "Deprecated models").
 
-| Model ID | Notes | Source |
-|---|---|---|
-| `eleven_flash_v2_5` | Recommended low-latency model. 32 languages. About 50% lower API price per character than the older model. | [snippet: https://help.elevenlabs.io/hc/en-us/articles/17883183930129-What-models-do-you-offer-and-what-is-the-difference-between-them] |
-| `eleven_v3` | Most expressive model. API price is discounted vs. website. Character limit conflicts between sources: 3,000 vs. 5,000. | [snippet: same help article; https://help.elevenlabs.io/hc/en-us/articles/35869113958801-How-much-does-it-cost-to-generate-using-Eleven-v3] |
-| `eleven_turbo_v2_5` | Deprecated. Help article says it is "outclassed by Flash models" and points to `eleven_flash_v2_5`. | [snippet: help article above] |
-| `eleven_v4` | Mentioned in the integration guide examples and in a pricing snippet. Not verified against a model page. | UNCONFIRMED |
+| Model ID | Use | Char limit / request | Notes |
+|---|---|---|---|
+| `eleven_v4` | Highest quality, most emotive | 10,000 (about 10 min) | 90+ languages. Recommended for quality. |
+| `eleven_v4_turbo` | Real-time, expressive | UNCONFIRMED (not in the limits table) | Median latency about 100 ms; audio tags supported. |
+| `eleven_flash_v2_5` | Fast, cheap, low latency | 40,000 (about 40 min) | About 100 ms latency; 32 languages; "50% lower price per character for API generations". |
+| `eleven_v3` | Expressive, dramatic | 5,000 (about 5 min) | Older generation. Earlier note said 3,000 - the docs now say 5,000. |
+| `eleven_multilingual_v2` | Stable long-form | 10,000 | 29 languages. Better number normalization than Flash. |
+| `eleven_turbo_v2_5` | - | - | **Deprecated** (listed under "Deprecated models"); docs say use Flash. |
 
-**Credits per character.**
-- Flash v2.5 through the API: about **0.5 credit per character** ("half the credits per character") [snippet: https://elevenlabs.io/docs/overview/models]. Older text says "1 credit per 2 characters", which is the same rate. Confirm on the pricing page.
-- Other models: sources conflict. Treat as UNCONFIRMED until checked on https://elevenlabs.io/pricing/api.
+Source for the v4 entries: https://elevenlabs.io/docs/overview/models (Flagship models).
 
-**Free-plan availability per model:** UNCONFIRMED. The free plan's API access is covered in section 3.
+**Credits per character (API):**
+- Flash v2.5 and Flash/Turbo v2: discounted, **0.5 to 1 credit per character** for API use (https://elevenlabs.io/pricing, FAQ "How do text characters and credits work?").
+- Multilingual v2: **1 credit per character** (same FAQ).
+- Text to Speech generally: 1 credit per character (same FAQ).
+- Eleven v4 / v4 Turbo / v3 credit rate: UNCONFIRMED (the FAQ names only the groups above).
+
+**Free-plan API access per model:** UNCONFIRMED. No page lists model-by-model free-tier eligibility.
+
+**Recommendation for the Arena:** `eleven_flash_v2_5` for cheapest low latency; `eleven_v4` if quality matters more than latency and the free allowance (section 3) covers it.
 
 ---
 
 ## 3. Free plan
 
-- **Allowance:** 10,000 credits per month, roughly 10 minutes of audio, no credit card [snippet: https://elevenlabs.io/pricing, https://elevenlabs.io/pricing/api].
-- **Rollover:** unused credits roll over for up to two months [snippet: developer docs].
-- **API access on free:** a snippet implies yes (a Free row appears in the concurrency table) but this is an inference. UNCONFIRMED.
-- **Terms:** free plan is for personal, non-commercial use and requires attribution to ElevenLabs [snippet: https://elevenlabs.io/pricing]. **Check this before a public deployment of the Arena.**
-- **Premade/default voices via API on free:** UNCONFIRMED.
-- **Voice Library (community) voices need a paid plan:** UNCONFIRMED.
-- **Default voices expire:** a help article snippet says all Default voices expire on **December 31, 2026**, and legacy voice IDs are routed to replacement Default voice IDs [snippet: https://help.elevenlabs.io/hc/en-us/articles/26942950589969-What-are-Default-voices]. Today is 2026-11-07, so do not hard-code voice IDs. Fetch them at build time.
+Source: https://elevenlabs.io/pricing and its FAQ.
+
+- **Credits:** Free plan = **10,000 credits per month** ("Free $0 (10,000 credits)").
+- **Rollover:** "Rollover does not apply to the Free plan." (FAQ). Earlier note saying rollover applies is **wrong for Free**.
+- **Per-request credit cap:** exists for Free and paid plans; the number is not stated (UNCONFIRMED).
+- **API access on Free:** not stated as a yes or no on the pricing page. The voices docs warn "Voice Library voices are not available via the API to free tier users" (https://elevenlabs.io/docs/eleven-creative/voices/voice-library), which implies free users can call the API. Treat as implied, not confirmed.
+- **Commercial use:** the pricing comparison lists "Commercial License" under **Starter** ("Everything in free, plus Commercial License"). So the Free plan does not include a commercial license. Free use is therefore non-commercial. Source: https://elevenlabs.io/pricing.
+- **Attribution requirement:** the earlier note said the free plan requires attribution. Not found on the pricing page or the voice pages we read: UNCONFIRMED. Check the Terms of Service before any public deployment: https://elevenlabs.io/terms-of-use.
 
 ---
 
-## 4. Errors
+## 4. Default voices: what expires, and what replaces them
 
-- **401 (invalid/missing key):** [snippet: https://elevenlabs.io/docs/eleven-api/resources/errors; https://help.elevenlabs.io/hc/en-us/articles/19572237925521-API-Error-Code-400-or-401]. Body shape: a JSON `detail` object is referenced; exact inner keys UNCONFIRMED. Use the `detail.status` value to branch.
-- **Quota exceeded:** conflicting. A changelog snippet says 401 with a "quota exceeded" message [snippet: https://elevenlabs.io/docs/changelog/2025/5/5]. The help center lists a `quota_exceeded` code [snippet: help article]. UNCONFIRMED which is current.
-- **429 (rate/concurrency):** docs name `rate_limit_exceeded` (per-endpoint) and `concurrent_limit_exceeded` [snippet: errors page]. Help center names `too_many_concurrent_requests` and `system_busy` [snippet: https://help.elevenlabs.io/hc/en-us/articles/19571824571921-API-Error-Code-429]. Use exponential backoff. Responses carry concurrency headers that can be logged [snippet].
-- **Invalid voice ID:** status and body UNCONFIRMED.
-- **Text too long:** the limits are in section 1 and 2. The status code is UNCONFIRMED.
+**Official statement** (the earlier "expire 2026-12-31" claim is correct):
 
-Rule for the code: log the full JSON response body on any non-2xx and branch on `detail.status`. Do not assume the names above.
+> "Our Default voices are being replaced with new voices that you will be able to use in perpetuity. All our Default voices will expire on December 31, 2026, and they will no longer be accessible after this date." (https://elevenlabs.io/docs/overview/capabilities/voices.md, Warning block; also https://elevenlabs.io/docs/help-center/product/voices/my-voices/what-are-default-voices.md)
+
+- **What is retired:** all **Default** voices, on **December 31, 2026**.
+- **Scope:** "Default voices are only available for accounts that were created before March 2026." So a new account (or any account made after March 2026) has no Default voices at all. Our account's eligibility is UNCONFIRMED.
+- **Legacy voices** (the older Antoni, Charlie, George, Callum, etc.) are "fully deprecated and removed from all products." API calls with a legacy voice ID "will automatically route to their replacement voice IDs" (https://elevenlabs.io/docs/help-center/product/voices/my-voices/what-are-legacy-voices.md).
+- **Replacements:** the Default-to-new table (https://elevenlabs.io/docs/help-center/product/voices/my-voices/what-are-default-voices.md) maps each old Default voice to a **Voice Library** voice (`elevenlabs.io/app/voice-library?voiceId=...`). The replacements are "not a strict 1-to-1 replacement."
+
+**Which voices a FREE-plan API user can use going forward:**
+
+- Voice Library voices: **"Voice Library voices are not available via the API to free tier users."** (https://elevenlabs.io/docs/overview/capabilities/voices.md, Warning). This is a blanket statement.
+- Per voice, the API returns `sharing.free_users_allowed` and `available_for_tiers` (https://elevenlabs.io/docs/api-reference/voices/search). A voice can be checked at runtime.
+- Some library voices are paid-only ("This voice is not available for free users", https://elevenlabs.io/docs/eleven-creative/voices/voice-library).
+- Premade voices: the API filters by `category=premade` (https://elevenlabs.io/docs/api-reference/voices/search). Whether any premade voice is free-tier usable: UNCONFIRMED.
+- Voice Design and Voice Cloning on Free: UNCONFIRMED.
+
+**Answer to item 4:** no voice is officially confirmed as usable by a free-plan API user that also stays available permanently. The official "perpetuity" promise covers the replacement voices, but the free-tier API restriction on library voices conflicts with that for our use case. Filter voices at runtime with `GET /v2/voices?category=premade` (or the search endpoint) and check `sharing.free_users_allowed` and `available_for_tiers`.
 
 ---
 
-## 5. Premade / default voices
+## 5. Errors
 
-Lookup: `GET /v2/voices` with a category filter (`premade`); up to 100 IDs per lookup [snippet: https://elevenlabs.io/docs/api-reference/voices/search]. The older `GET /v1/voices/{voice_id}` also exists [snippet].
+Source: https://elevenlabs.io/docs/eleven-api/resources/errors
 
-Voice descriptions (gender/age/accent) are UNCONFIRMED for every entry. Listen to each preview from the list endpoint before casting.
+**Body shape** (exact example from the page):
 
-| Role idea | Name | voice_id | Status |
+```json
+{"detail": {"type": "validation_error", "code": "invalid_parameters",
+  "message": "...", "status": "invalid_parameters", "request_id": "...", "param": "keyterms"}}
+```
+
+Fields: `type`, `code`, `message`, `status` (legacy, do not use), `request_id`, `param`. Branch on `detail.code`.
+
+| Case | HTTP | `detail.type` | `detail.code` |
 |---|---|---|---|
-| Versatile female narrator | Rachel | `21m00Tcm4TlvDq8ikWAM` | ID [snippet: convert/voice docs]; premade category [snippet]; description UNCONFIRMED |
-| Legacy male (old) | Charlie | `IKne3meq5aSn9XLyUdCD` | Legacy ID [snippet: help article]. Replacement "Baxter - Dry Calm Aussie"; replacement ID UNCONFIRMED. Prefer the replacement. |
-| Legacy male (British) | George | `JBFqnCBsd6RMkjVDRZzb` | Legacy ID [snippet]. Replacement "Eldrin - Crisp British Baritone"; replacement ID UNCONFIRMED. |
-| Legacy male (trickster) | Callum | `N2lVS1w4EtoT3dr4eOWO` | Legacy ID [snippet]. Replacement "Callum - Husky Trickster"; replacement ID UNCONFIRMED. |
-| Male (replaces Antoni) | Adam | UNCONFIRMED | Adam is named as Antoni's replacement [snippet]. ID not found. |
-| Weary old judge | UNCONFIRMED | UNCONFIRMED | Search the list by description. Not found. |
-| Gruff/bright/young/accent entries (x6) | UNCONFIRMED | UNCONFIRMED | Not found in any source gathered here. Pull from `GET /v2/voices?category=premade`. |
+| Invalid API key | 401 | `authentication_error` | `invalid_api_key` (also `missing_api_key`, `invalid_authorization_header`) |
+| Quota / credits exhausted | 402 | `payment_required` | `insufficient_credits` |
+| Rate limit | 429 | `rate_limit_error` | `rate_limit_exceeded` |
+| Concurrency limit | 429 | `rate_limit_error` | `concurrent_limit_exceeded` |
+| System busy | 429 | `rate_limit_error` | `system_busy` |
+| Invalid voice ID | 404 | `not_found` | `voice_not_found` |
+| Text too long | 400 (per type table) | `validation_error` | `text_too_long` |
+| Feature/model not on plan | 403 | `authorization_error` | `feature_not_available` / `model_access_denied` / `voice_access_denied` |
 
-Summary: only Rachel's ID is confirmed by a snippet. The others need the list endpoint.
+- The earlier note's "quota exceeded" with a 401 and the code `quota_exceeded`: **not found** on the official errors page. Quota exhaustion is `insufficient_credits` (402).
+- The `text_too_long` code is listed under `validation_error`. The page's type table maps `validation_error` to 400.
+- 429: back off exponentially on `rate_limit_exceeded`; wait for in-flight requests on `concurrent_limit_exceeded` (page text).
+
+Rule for the code: log the full JSON on any non-2xx and branch on `detail.code`.
 
 ---
 
-## 6. CORS
+## 6. Voices for the Arena
 
-UNCONFIRMED. Not needed for the planned server-side call from a Cloudflare Worker.
+**Caveat.** The official replacement table (section 4) gives IDs and names only. It gives no gender, age, or accent. Descriptors below come from the names. Listen to each voice in the Voice Library before casting. Free-tier API access for each voice is UNCONFIRMED (section 4).
+
+Source for all IDs: https://elevenlabs.io/docs/help-center/product/voices/my-voices/what-are-default-voices.md (replacement column).
+
+| # | Name | voice_id | Name-based descriptor (UNCONFIRMED gender/age/accent) | Suggested role |
+|---|---|---|---|---|
+| 1 | Darian - Warm Grounded Storyteller | `gOupLcAkjEnguROwi4oS` | Warm, grounded | Host / narrator |
+| 2 | Talia - Warm Soft Guide | `OZ0L6eISlOejga3XjDFt` | Warm, soft | Moderator |
+| 3 | Elara - Crisp Pro Narrator | `WQP7cQUF5aAS6Axh5yaa` | Crisp, professional | Neutral narrator |
+| 4 | Baxter - Dry Calm Aussie | `jSuBIjxMKhqIfb0wCK1F` | Dry, calm, Australian accent | Dry-wit debater |
+| 5 | Eldrin - Crisp British Baritone | `6WwXjDDEMyNmFG95zycZ` | British baritone | Pompous debater |
+| 6 | Callum - Husky Trickster | `fs2OqxduwXgp9foh2xjK` | Husky, sly | Trickster debater |
+| 7 | Kaelen - Amateur Warrior | `10NkTYmU7tSz3Kkl3Lex` | Earnest, bombastic | Overconfident debater |
+| 8 | Lawrence - Bright and Informative | `ktkP7Nsj67dw2zcplQYt` | Bright, earnest | Eager-nerd debater |
+| 9 | Wyatt - Seasoned Mentor | `FrS6cKLB1wg4WYgPa9GW` | Seasoned, mentor-like | **Weary old judge (best name fit; UNCONFIRMED)** |
+| 10 | Jade - Upbeat and Natural | `g7LVvkPWALzPxOQbF6OE` | Upbeat | Chirpy debater |
+| 11 | Warren - Effortless and Cool | `7QN34D2r3hCNwbOYIeK0` | Laid-back | Smug debater |
+| 12 | Maisie - Friendly Casual Neighbor | `QtY3JBOUKEB5xzrRfOKc` | Friendly, casual | Gossip / commentator |
+
+- **Weary old judge:** no voice is named as old or weary. Wyatt (#9) is the closest name match. Eldrin (#5) is an alternative. Both UNCONFIRMED.
+- Adam (Antoni's replacement) and Rachel: IDs not found on any official page we read. Do not use until confirmed.
+
+**Action before use:** pull each ID's metadata with `GET /v2/voices` (filter `category`, `search`) and confirm `sharing.free_users_allowed` and `available_for_tiers` for the free plan.
 
 ---
 
 ## Open items
 
-1. Allow `elevenlabs.io` in the session network settings, then re-run the research against the pages listed above.
-2. Confirm the streaming path and `output_format` allowed values.
-3. Confirm free-plan API access per model and the quota/429 error names.
-4. Pull the premade voice list and cast the debate characters from it, storing IDs in config, not in code.
+1. Confirm free-tier API eligibility for each voice in section 6 (runtime check or the Voice Library).
+2. Confirm the `audio/*` Content-Type of streamed MP3.
+3. Confirm the attribution requirement in the Terms of Service, if any.
+4. Confirm credit cost and free-plan access for `eleven_v4` and `eleven_v4_turbo`.
+5. Confirm the per-request credit cap on the Free plan.
+6. Check the account creation date: Default voices are available only for accounts created before March 2026.
