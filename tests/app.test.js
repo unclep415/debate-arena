@@ -21,7 +21,7 @@ async function open(cfg = {}, viewport) {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const sample = async (input, opts = {}) => {
       const idx = window.__calls.filter((c) => c.kind === 'sample').length;
-      window.__calls.push({ kind: 'sample', input });
+      window.__calls.push({ kind: 'sample', input, cache: opts.cache });
       const text = cfg.textFor ? new Function('i', 'return (' + cfg.textFor + ')(i)')(idx) : 'Turn ' + (idx + 1) + ' text';
       const half = Math.ceil(text.length / 2);
       // Real API: every failure is a rejected plain {code, message, text?}; abort is code 'cancelled'.
@@ -29,7 +29,7 @@ async function open(cfg = {}, viewport) {
       if (opts.signal && opts.signal.aborted) throw abortErr();
       await sleep(cfg.delay || 10);
       if (opts.onText) opts.onText({ text: text.slice(0, half), delta: text.slice(0, half) });
-      if (cfg.failAt === idx) throw { code: cfg.failCode || 'internal', message: cfg.failMessage || 'Boom happened', text: text.slice(0, half) };
+      if (cfg.failAt === idx) throw cfg.failCode === 'refused' ? { code: 'refused', message: 'Refused' } : { code: cfg.failCode || 'internal', message: cfg.failMessage || 'Boom happened', text: text.slice(0, half) };
       if (cfg.hangAt === idx) {
         await new Promise((_, rej) => {
           const fire = () => setTimeout(() => rej(abortErr()), cfg.abortDelay || 0);
@@ -44,7 +44,7 @@ async function open(cfg = {}, viewport) {
     sample.json = async (input, opts = {}) => {
       if (/Supreme Court/.test(String(input))) {
         const jx = window.__calls.filter((c) => c.kind === 'judge').length;
-        window.__calls.push({ kind: 'judge', input });
+        window.__calls.push({ kind: 'judge', input, cache: opts.cache });
         if (cfg.judgeHang) await new Promise((_, rej) => opts.signal && opts.signal.addEventListener('abort', () => rej({ code: 'cancelled', message: 'cancelled' })));
         await sleep(cfg.delay || 10);
         if (cfg.judgeFail && cfg.judgeFail.at === jx) throw { code: cfg.judgeFail.code, message: 'Judge broke', text: 'x' };
@@ -52,7 +52,7 @@ async function open(cfg = {}, viewport) {
         return outs[Math.min(jx, outs.length - 1)];
       }
       const jidx = window.__calls.filter((c) => c.kind === 'json').length;
-      window.__calls.push({ kind: 'json', input });
+      window.__calls.push({ kind: 'json', input, cache: opts.cache });
       if (cfg.jsonFailCode) throw { code: cfg.jsonFailCode, message: 'Persona trouble' };
       if (cfg.jsonHang) {
         await new Promise((_, rej) => opts.signal && opts.signal.addEventListener('abort', () => rej({ code: 'cancelled', message: 'cancelled' })));
@@ -64,6 +64,7 @@ async function open(cfg = {}, viewport) {
         against: { name: 'Gen Against', emoji: '🐢', personality: 'slow' },
       };
     };
+    if (cfg.noClaude) return;
     window.claude = {
       use: (name) => sleep(cfg.useDelay || 20).then(() => (cfg.useNull ? null : sample)),
     };
@@ -475,3 +476,69 @@ test('scorecard has no horizontal scroll at 375px', async () => {
   assert.ok(w[0] <= w[1], JSON.stringify(w));
   await ctx.close();
 });
+
+// ---- final review ----
+
+test('no window.claude at all (plain file): unavailable banner, Start disabled, no page errors', async () => {
+  const { page, ctx, errors } = await open({ noClaude: true });
+  await page.waitForFunction(() => /isn't available in this view/.test(document.body.textContent));
+  await page.fill('#topic', 'Pineapple');
+  assert.equal(await page.isDisabled('#start'), true);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('every call passes cache:false so re-running the same debate is fresh', async () => {
+  const { page, ctx } = await open();
+  await fillAndStart(page, { f: '' });
+  await page.waitForSelector('.scorecard');
+  const caches = await page.evaluate(() => window.__calls.map((c) => c.cache));
+  assert.equal(caches.length, 8);
+  assert.ok(caches.every((c) => c === false), JSON.stringify(caches));
+  await ctx.close();
+});
+
+test('judge returns reasoning but unusable scores: reasoning shown with the fallback', async () => {
+  const { page, ctx } = await open({ judgeOut: [{ scores: 'n/a', reasoning: 'I fell asleep at the bench.' }, GOOD] });
+  await fillAndStart(page);
+  await page.waitForSelector('.retry');
+  const t = await page.textContent('#transcript');
+  assert.match(t, /I fell asleep at the bench\./);
+  assert.match(t, /judge couldn.t score this one/i);
+  await ctx.close();
+});
+
+for (const code of ['sampling_disabled', 'capability_disabled', 'not_declared', 'capability_removed']) {
+  test(`permanent code ${code} mid-debate: banner, no retry, Start stays disabled`, async () => {
+    const { page, ctx } = await open({ failAt: 1, failCode: code });
+    await fillAndStart(page);
+    await page.waitForSelector('#banner:not([hidden])');
+    await page.waitForSelector('#newDebate:not([hidden])');
+    assert.equal(await page.$$eval('.retry', (e) => e.length), 0);
+    await page.click('#newDebate');
+    assert.equal(await page.isDisabled('#start'), true);
+    assert.equal(await page.isVisible('#banner'), true);
+    await ctx.close();
+  });
+}
+
+test('not_granted: after New debate, Start stays disabled (never re-ask)', async () => {
+  const { page, ctx } = await open({ failAt: 0, failCode: 'not_granted' });
+  await fillAndStart(page);
+  await page.waitForSelector('#newDebate:not([hidden])');
+  await page.click('#newDebate');
+  assert.equal(await page.isDisabled('#start'), true);
+  assert.match(await page.textContent('#banner'), /permission/i);
+  await ctx.close();
+});
+
+test('refused turn: partial withdrawn, retry offered with a non-developer message', async () => {
+  const { page, ctx } = await open({ failAt: 1, failCode: 'refused' });
+  await fillAndStart(page);
+  await page.waitForSelector('.retry');
+  const t = await page.$eval('.bubble:nth-of-type(2) .text', (e) => e.textContent);
+  assert.doesNotMatch(t, /Turn 2/);
+  assert.match(await page.textContent('#transcript'), /declined/i);
+  await ctx.close();
+});
+

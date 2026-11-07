@@ -9,6 +9,7 @@
   var stopped = false;
   var controller = null;
   var runId = 0;
+  var blocked = false;    // a permanent refusal (e.g. not_granted): never ask again in this view
 
   var els = {
     banner: $('banner'), setup: $('setup'), topic: $('topic'), dice: $('dice'),
@@ -21,7 +22,7 @@
 
   function refreshStart() {
     var blank = !L.cleanInput(els.topic.value, 200);
-    els.start.disabled = connecting || !sample || running || blank;
+    els.start.disabled = connecting || !sample || blocked || running || blank;
     els.start.textContent = connecting ? 'Connecting…' : 'Start debate';
   }
 
@@ -65,7 +66,7 @@
   async function getPersonas(topic, forText, againstText) {
     if (forText && againstText) return L.normalizePersonas(null, forText, againstText);
     controller = new AbortController();
-    var raw = await sample.json(L.buildPersonaPrompt(topic, forText, againstText), { signal: controller.signal });
+    var raw = await sample.json(L.buildPersonaPrompt(topic, forText, againstText), { signal: controller.signal, cache: false });
     return L.normalizePersonas(raw, forText, againstText);
   }
 
@@ -78,9 +79,18 @@
   }
 
   var DECLINED = 'Permission was declined, so Claude can’t run this debate. Reload and allow access to try again.';
+  // Codes the platform says are permanent for this view: hide the feature, never re-ask.
+  var PERMANENT = { not_granted: 1, sampling_disabled: 1, not_declared: 1, capability_disabled: 1, capability_removed: 1 };
+  function isPermanent(err) { return !!(err && PERMANENT[err.code]); }
+  function blockFor(err) {
+    blocked = true;
+    showBanner(err.code === 'not_granted' ? DECLINED : 'Claude isn’t available for this account or view, so the debate can’t run.');
+  }
   function errorCopy(err) {
     var code = err && err.code;
     if (code === 'rate_limited') return 'Claude is rate limited right now. Wait a moment, then retry.';
+    if (code === 'session_expired') return 'Your Claude session expired. Sign in again, then retry.';
+    if (code === 'refused') return 'Claude declined to write this turn. Retrying may go differently, or start a new debate with a different topic.';
     var m = err && typeof err.message === 'string' && err.message ? err.message : 'unknown error';
     return 'Something went wrong: ' + m;
   }
@@ -186,10 +196,10 @@
     } catch (err) {
       if (isAbort()) return stopOrStale();
       if (err && err.code === 'cancelled') return endDebate('Debate stopped.');
-      showBanner(err && err.code === 'not_granted' ? DECLINED
-        : 'Could not set up the debaters. ' + errorCopy(err));
+      if (isPermanent(err)) blockFor(err);
+      else showBanner('Could not set up the debaters. ' + errorCopy(err));
       running = false; controller = null; els.arena.hidden = true; els.setup.hidden = false;
-      els.retryPersonas.hidden = !!(err && err.code === 'not_granted');
+      els.retryPersonas.hidden = isPermanent(err);
       setInputsDisabled(false); refreshStart();
       return;
     }
@@ -211,6 +221,7 @@
         try {
           var res = await sample(messages, {
             signal: controller.signal,
+            cache: false,
             onText: function (u) { if (myRun === runId) bubble.text.textContent = u.text; }
           });
           text = (res && typeof res.text === 'string') ? res.text : bubble.text.textContent;
@@ -218,12 +229,14 @@
           if (isAbort()) { bubble.text.classList.remove('cursor'); return stopOrStale(); }
           bubble.text.classList.remove('cursor');
           if (err && err.code === 'cancelled') return endDebate('Debate stopped.');
-          var partial = (err && typeof err.text === 'string') ? err.text : bubble.text.textContent;
+          // `refused` withdraws any partial (the platform sends no text); otherwise keep what streamed.
+          var partial = err && err.code === 'refused' ? ''
+            : (err && typeof err.text === 'string') ? err.text : bubble.text.textContent;
           bubble.text.textContent = partial ? partial + ' ' : '';
           var cut = document.createElement('span'); cut.className = 'cutoff'; cut.textContent = '(cut off)';
           bubble.text.appendChild(cut);
-          if (err && err.code === 'not_granted') {
-            showBanner(DECLINED);
+          if (isPermanent(err)) {
+            blockFor(err);
             return endDebate('Debate ended.');
           }
           setStatus('Paused: this turn failed.');
@@ -240,13 +253,14 @@
     while (true) {
       setStatus('The judge is deliberating…');
       controller = new AbortController();
-      var verdict = null, failMsg = null;
+      var verdict = null, failMsg = null, raw = null;
       try {
-        verdict = L.normalizeVerdict(await sample.json(L.buildJudgePrompt(topic, personas, transcript), { signal: controller.signal }));
+        raw = await sample.json(L.buildJudgePrompt(topic, personas, transcript), { signal: controller.signal, cache: false });
+        verdict = L.normalizeVerdict(raw);
       } catch (err) {
         if (isAbort()) return stopOrStale();
         if (err && err.code === 'cancelled') return endDebate('Debate stopped.');
-        if (err && err.code === 'not_granted') { showBanner(DECLINED); return endDebate('Debate ended.'); }
+        if (isPermanent(err)) { blockFor(err); return endDebate('Debate ended.'); }
         if (!err || err.code !== 'invalid_json') failMsg = errorCopy(err);
       }
       if (isAbort()) return stopOrStale();
@@ -255,7 +269,10 @@
         return endDebate('The debate is over.');
       }
       setStatus('Paused: the judge needs another go.');
-      var retryJudge = await askRetry(myRun, els.transcript, failMsg || 'The judge couldn’t score this one.', 'Retry judge');
+      // Unusable scores but some reasoning: show what the judge did say.
+      var said = raw && typeof raw === 'object' && typeof raw.reasoning === 'string' ? L.cleanInput(raw.reasoning, 600) : '';
+      var judgeMsg = failMsg || ((said ? 'The judge said: “' + said + '” But ' : 'The ') + 'judge couldn’t score this one.');
+      var retryJudge = await askRetry(myRun, els.transcript, judgeMsg, 'Retry judge');
       if (!retryJudge || isAbort()) return stopOrStale();
     }
   }
