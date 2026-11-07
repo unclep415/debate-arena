@@ -154,3 +154,33 @@ test('empty text resolves without utterance', async () => {
   await V.speak('   ', 'for');
   assert.equal(utts.length, 0);
 });
+
+test('prime: resumes and speaks a silent empty utterance synchronously (gesture unlock)', () => {
+  let resumed = 0;
+  globalThis.speechSynthesis.resume = () => { resumed++; };
+  V.prime();
+  assert.equal(resumed, 1);
+  assert.equal(utts.length, 1, 'must speak synchronously, not after an await');
+  assert.equal(utts[0].text, '');
+  assert.equal(utts[0].volume, 0);
+  delete globalThis.speechSynthesis;
+  V.prime(); // unsupported: no throw
+});
+
+test('voices that load late (voiceschanged) are used; empty list is not locked in', async () => {
+  // voice.js registers its listener once per module; capture it whichever fake it was added to.
+  const listeners = [];
+  globalThis.speechSynthesis.addEventListener = (type, fn) => { if (type === 'voiceschanged') listeners.push(fn); };
+  delete require.cache[require.resolve('../src/voice.js')];
+  const V2 = require('../src/voice.js');
+  let p = V2.speak('First.', 'for');
+  await tick();
+  assert.equal(utts[0].voice, undefined, 'no voices yet');
+  utts[0].onend({}); await p;
+  voicesList = [voice('Late', 'en-US')];
+  listeners.forEach((fn) => fn());
+  p = V2.speak('Second.', 'for');
+  await tick();
+  assert.equal(utts[1].voice && utts[1].voice.name, 'Late');
+  utts[1].onend({}); await p;
+});

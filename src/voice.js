@@ -140,6 +140,19 @@
     });
   }
 
+  // Call synchronously inside a click handler: iOS Safari (and some Chrome builds) only let a page
+  // speak after speech was started from a user gesture, and real turns are spoken much later.
+  function prime() {
+    if (!isSupported()) return;
+    try { if (typeof G.speechSynthesis.resume === 'function') G.speechSynthesis.resume(); } catch (e) { /* ignore */ }
+    loadVoices();
+    try {
+      var u = new G.SpeechSynthesisUtterance('');
+      u.volume = 0;
+      G.speechSynthesis.speak(u);
+    } catch (e) { /* ignore */ }
+  }
+
   function cancel() {
     epoch++;
     var fns = pending.slice();
@@ -148,7 +161,7 @@
     fns.forEach(function (f) { f(); });
   }
 
-  var api = { isSupported: isSupported, assignVoices: assignVoices, speak: speak, cancel: cancel, chunk: chunk, timeoutMs: timeoutMs };
+  var api = { isSupported: isSupported, assignVoices: assignVoices, speak: speak, cancel: cancel, prime: prime, chunk: chunk, timeoutMs: timeoutMs };
   G.DebateVoice = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })();

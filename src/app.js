@@ -37,7 +37,7 @@
   function setVoice(on) {
     voiceOn = !!on;
     try { localStorage.setItem(VOICE_KEY, voiceOn ? '1' : '0'); } catch (e) { /* storage unavailable */ }
-    if (!voiceOn && voiceSupported) V.cancel();
+    if (voiceSupported) { if (voiceOn) V.prime(); else V.cancel(); }
     renderVoice();
   }
   function cancelSpeech() { if (voiceSupported) V.cancel(); }
@@ -208,6 +208,7 @@
     if (!topic || !sample || running) return;
     cancelPending();
     cancelSpeech();
+    if (voiceOn && voiceSupported) V.prime(); // still inside the Start click: unlocks later speech
     running = true; stopped = false; myRun = ++runId;
     refreshStart();
     setInputsDisabled(true);

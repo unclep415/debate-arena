@@ -16,7 +16,10 @@ async function open(cfg = {}, viewport, existingCtx) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   await page.addInitScript((cfg) => {
-    window.__log = []; window.__utts = []; window.__cancels = 0; window.__samples = 0;
+    window.__log = []; window.__utts = []; window.__primes = []; window.__cancels = 0; window.__samples = 0; window.__json = 0;
+    // __gesture is true only during the task that dispatched a user click (and the submit it triggers).
+    window.__gesture = false;
+    window.addEventListener('click', () => { window.__gesture = true; setTimeout(() => { window.__gesture = false; }, 0); }, true);
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const sample = async (input, opts = {}) => {
       const idx = window.__samples++;
@@ -26,7 +29,7 @@ async function open(cfg = {}, viewport, existingCtx) {
       if (opts.onText) opts.onText({ text, delta: text });
       return { text, truncated: false };
     };
-    sample.json = async () => ({
+    sample.json = async () => (window.__log.push('json:' + window.__json++), {
       scores: { for: { logic: 8, persuasion: 7, character: 6 }, against: { logic: 5, persuasion: 5, character: 5 } },
       winner: 'for', reasoning: 'For was funnier. Case closed.',
     });
@@ -35,7 +38,9 @@ async function open(cfg = {}, viewport, existingCtx) {
       window.SpeechSynthesisUtterance = function (t) { this.text = t; };
       Object.defineProperty(window, 'speechSynthesis', { configurable: true, writable: true, value: {
         getVoices: () => [],
+        resume: () => { window.__log.push('resume'); },
         speak: (u) => {
+          if (u.text === '') { window.__primes.push({ gesture: window.__gesture, volume: u.volume }); window.__log.push('prime'); return; }
           const i = window.__utts.length;
           window.__utts.push({ text: u.text, pitch: u.pitch, rate: u.rate, u, ended: false });
           window.__log.push('utt:' + i);
@@ -73,6 +78,7 @@ test('voice off by default: zero utterances, debate behaves as before', async ()
   await start(page);
   await over(page);
   assert.equal(await nUtts(page), 0);
+  assert.equal(await page.evaluate(() => window.__primes.length), 0);
   assert.equal(await page.locator('.bubble').count(), 6);
   assert.deepEqual(errors, []);
   await ctx.close();
@@ -98,6 +104,8 @@ test('voice on: 7 utterances in order; next turn waits for the previous utteranc
   assert.match(utts[6], /For was funnier\. Case closed\./);
   const log = await page.evaluate(() => window.__log);
   for (let n = 0; n < 5; n++) assert.ok(log.indexOf('end:' + n) < log.indexOf('sample:' + (n + 1)));
+  // both personas are given, so the only json call is the judge (the 7th model call): it waits for utterance 6
+  assert.ok(log.indexOf('end:5') >= 0 && log.indexOf('end:5') < log.indexOf('json:0'));
   const pr = await page.evaluate(() => window.__utts.map((u) => u.pitch + '/' + u.rate));
   assert.notEqual(pr[0], pr[1]); assert.notEqual(pr[6], pr[0]); assert.notEqual(pr[6], pr[1]);
   assert.deepEqual(errors, []);
@@ -212,5 +220,26 @@ test('no horizontal scroll at 375px with voice toggles on both screens', async (
   await start(page);
   await over(page);
   assert.ok(await sw());
+  await ctx.close();
+});
+
+test('speech is primed synchronously inside the toggle click and the Start click (iOS unlock)', async () => {
+  const { page, ctx } = await open({ auto: true });
+  await page.click('#voiceSetup');
+  let primes = await page.evaluate(() => window.__primes);
+  assert.equal(primes.length, 1);
+  assert.equal(primes[0].gesture, true);
+  assert.equal(primes[0].volume, 0);
+  await start(page);
+  await page.waitForFunction(() => window.__utts.length >= 1);
+  primes = await page.evaluate(() => window.__primes);
+  assert.equal(primes.length, 2);
+  assert.equal(primes[1].gesture, true, 'Start must prime within the click, before any await');
+  const log = await page.evaluate(() => window.__log);
+  assert.ok(log.lastIndexOf('prime') < log.indexOf('sample:0'), 'prime precedes the first model call');
+  assert.ok(log.includes('resume'));
+  // the real utterances happen later, outside the gesture
+  await page.click('#voiceArena'); // off: no prime
+  assert.equal(await page.evaluate(() => window.__primes.length), 2);
   await ctx.close();
 });
