@@ -1,0 +1,507 @@
+<title>Debate Arena Field Guide</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bowlby+One&family=Figtree:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: one reading column (~70ch) that widens for diagrams; sections run in the order a request travels, then why, then how it was built. */
+  :root {
+    --bg: #f4f2f9;
+    --surface: #ffffff;
+    --sunk: #ebe8f3;
+    --fg: #1e1b2e;
+    --muted: #5f5a77;
+    --line: #d6d1e6;
+    --for: #1f5fd1;
+    --for-soft: #e3ecff;
+    --against: #cf3f1d;
+    --against-soft: #ffe7df;
+    --claude: #8a4b14;
+    --claude-soft: #f8ead9;
+    --cf: #6b3fc4;
+    --cf-soft: #eee6fb;
+    --ok: #1d7a43;
+    --font-display: "Bowlby One", "Arial Black", Impact, sans-serif;
+    --font-body: "Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #13111c; --surface: #1d1a2b; --sunk: #191626; --fg: #efecf8; --muted: #a7a1c0; --line: #352f4b;
+      --for: #7aa3ff; --for-soft: #1b2850; --against: #ff8461; --against-soft: #46211a;
+      --claude: #f0b27a; --claude-soft: #3a2817; --cf: #b99bff; --cf-soft: #2a2145; --ok: #74d39b;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #13111c; --surface: #1d1a2b; --sunk: #191626; --fg: #efecf8; --muted: #a7a1c0; --line: #352f4b;
+    --for: #7aa3ff; --for-soft: #1b2850; --against: #ff8461; --against-soft: #46211a;
+    --claude: #f0b27a; --claude-soft: #3a2817; --cf: #b99bff; --cf-soft: #2a2145; --ok: #74d39b;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 17px; line-height: 1.6;
+    margin: 0; padding-block: 40px 80px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+  }
+  main { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 64px; }
+  .prose { max-width: 70ch; }
+  h1, h2, h3 { text-wrap: balance; margin: 0; }
+  h1 { font-family: var(--font-display); font-weight: 400; font-size: clamp(2.2rem, 7vw, 3.6rem); line-height: 1; letter-spacing: .01em; }
+  h1 .f { color: var(--for); } h1 .a { color: var(--against); }
+  h2 { font-family: var(--font-display); font-weight: 400; font-size: clamp(1.5rem, 4vw, 2rem); line-height: 1.1; }
+  h3 { font-size: 1.1rem; font-weight: 700; }
+  p { margin: 0; }
+  .eyebrow { font-family: var(--font-mono); font-size: .75rem; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+  section { display: flex; flex-direction: column; gap: 20px; }
+  .lede { font-size: 1.2rem; color: var(--muted); max-width: 60ch; }
+  code, .mono { font-family: var(--font-mono); font-size: .86em; }
+  code { background: var(--sunk); border: 1px solid var(--line); border-radius: 5px; padding: 1px 5px; overflow-wrap: anywhere; }
+  a { color: var(--for); }
+  :focus-visible { outline: 3px solid var(--fg); outline-offset: 2px; }
+
+  header { display: flex; flex-direction: column; gap: 16px; }
+  .versions { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .version { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .version .tag { align-self: flex-start; font-family: var(--font-mono); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; padding: 2px 8px; border-radius: 999px; }
+  .version.claudeai .tag { background: var(--claude-soft); color: var(--claude); }
+  .version.hosted .tag { background: var(--cf-soft); color: var(--cf); }
+  .version p { color: var(--muted); font-size: .95rem; }
+
+  /* Diagram */
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+  .tab { font: inherit; font-weight: 600; font-size: .95rem; cursor: pointer; border: 2px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 999px; padding: 6px 16px; }
+  .tab[aria-selected="true"] { border-color: var(--fg); background: var(--fg); color: var(--bg); }
+  .diagram-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; align-items: start; }
+  .diagram { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+  .diagram svg { display: block; width: 100%; min-width: 720px; height: auto; }
+  .box-zone { fill: var(--sunk); stroke: var(--line); stroke-width: 1.5; }
+  .zone-label { fill: var(--muted); font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+  .node rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; transition: stroke .15s; }
+  .node text { fill: var(--fg); font-family: var(--font-body); font-size: 14px; font-weight: 600; }
+  .node .sub { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; font-weight: 400; }
+  .node { cursor: pointer; outline: none; }
+  .node:hover rect, .node:focus-visible rect { stroke: var(--fg); }
+  .node.sel rect { stroke: var(--fg); stroke-width: 2.5; }
+  .node.k-claude rect { fill: var(--claude-soft); }
+  .node.k-cf rect { fill: var(--cf-soft); }
+  .node.k-el rect { fill: var(--against-soft); }
+  .node.k-page rect { fill: var(--for-soft); }
+  .edge { stroke: var(--muted); stroke-width: 1.6; fill: none; }
+  .edge-label { fill: var(--muted); font-family: var(--font-mono); font-size: 11px; }
+  .arrowhead { fill: var(--muted); }
+  .lock { fill: var(--fg); font-family: var(--font-mono); font-size: 11px; }
+  .detail { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 10px; min-width: 0; position: sticky; top: calc(16px + env(safe-area-inset-top, 0px)); }
+  .detail h3 { font-size: 1.05rem; }
+  .detail .where { font-family: var(--font-mono); font-size: .78rem; color: var(--muted); overflow-wrap: anywhere; }
+  .detail p { font-size: .95rem; }
+  .detail .why { border-top: 1px solid var(--line); padding-top: 10px; color: var(--muted); }
+  .hint { color: var(--muted); font-size: .9rem; }
+
+  /* Lifecycle */
+  .steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; counter-reset: step; }
+  .step { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 14px; align-items: start; }
+  .step::before { counter-increment: step; content: counter(step); font-family: var(--font-display); font-size: 1.3rem; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--surface); border: 2px solid var(--fg); }
+  .step-body { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .step-body p { color: var(--muted); font-size: .97rem; }
+  .calls { font-family: var(--font-mono); font-size: .78rem; color: var(--muted); }
+  details.peek { border-top: 1px dashed var(--line); padding-top: 8px; }
+  details.peek summary { cursor: pointer; font-family: var(--font-mono); font-size: .78rem; text-transform: uppercase; letter-spacing: .06em; color: var(--fg); }
+  pre { margin: 8px 0 0; background: var(--sunk); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; font-family: var(--font-mono); font-size: .8rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--fg); }
+
+  /* Context growth bar */
+  .growth { display: flex; flex-direction: column; gap: 6px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .gbar { display: grid; grid-template-columns: 110px minmax(0, 1fr) 70px; gap: 10px; align-items: center; font-size: .85rem; }
+  .gbar .track { height: 14px; background: var(--sunk); border-radius: 999px; overflow: hidden; }
+  .gbar .fill { height: 100%; border-radius: 999px; }
+  .gbar .fill.for { background: var(--for); } .gbar .fill.against { background: var(--against); } .gbar .fill.judge { background: var(--claude); }
+  .gbar .n { font-family: var(--font-mono); font-size: .78rem; color: var(--muted); text-align: right; font-variant-numeric: tabular-nums; }
+
+  /* Lessons */
+  .lessons { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .lesson { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .lesson .in-code { font-family: var(--font-mono); font-size: .76rem; color: var(--muted); overflow-wrap: anywhere; }
+  .lesson p { font-size: .95rem; }
+
+  /* Tables */
+  .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: .93rem; }
+  th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-family: var(--font-mono); font-size: .74rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { font-weight: 600; }
+
+  /* Team */
+  .team { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+  .role { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .role .model { font-family: var(--font-mono); font-size: .74rem; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; }
+  .role p { font-size: .9rem; color: var(--muted); }
+  .timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .timeline li { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); }
+  .timeline li:first-child { border-top: 0; }
+  .timeline .t { font-family: var(--font-mono); font-size: .8rem; font-weight: 500; }
+  .timeline .caught { color: var(--muted); font-size: .92rem; }
+  .tally { display: flex; gap: 24px; flex-wrap: wrap; }
+  .tally div { display: flex; flex-direction: column; }
+  .tally strong { font-family: var(--font-display); font-weight: 400; font-size: 2rem; line-height: 1; font-variant-numeric: tabular-nums; }
+  .tally span { font-size: .85rem; color: var(--muted); }
+
+  /* Exercises */
+  .exercises { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+  .exercises li { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+  .exercises .level { font-family: var(--font-mono); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .exercises p { color: var(--muted); font-size: .95rem; }
+
+  dl.gloss { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 10px 20px; margin: 0; }
+  dl.gloss dt { font-weight: 700; }
+  dl.gloss dd { margin: 0; color: var(--muted); }
+
+  @media (max-width: 820px) {
+    .diagram-wrap { grid-template-columns: minmax(0, 1fr); }
+    .detail { position: static; }
+    .team { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 600px) {
+    .versions, .lessons, .team { grid-template-columns: minmax(0, 1fr); }
+    dl.gloss { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+    dl.gloss dd { margin-bottom: 10px; }
+    .gbar { grid-template-columns: 84px minmax(0, 1fr) 56px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<main>
+  <header>
+    <p class="eyebrow">Field guide · what was built, why, and how</p>
+    <h1><span class="f">DEBATE</span> ARENA <span class="a">UNDER THE HOOD</span></h1>
+    <p class="lede">Two AI debaters argue a topic over three rounds, an AI judge scores them, and every line can be read aloud. This guide follows one request through the system, explains each decision, and shows what the build taught about working with Claude.</p>
+    <div class="versions">
+      <div class="version claudeai">
+        <span class="tag">Version 1 · claude.ai artifact</span>
+        <h3>Free, shareable, no server</h3>
+        <p>A single page hosted by claude.ai. It borrows each viewer's own Claude access through the <code>sample</code> capability and speaks with the browser's built-in voices.</p>
+      </div>
+      <div class="version hosted">
+        <span class="tag">Version 2 · Cloudflare Worker</span>
+        <h3>Your site, your keys, real voices</h3>
+        <p>The same page served from Cloudflare, plus a small server that holds your Anthropic and ElevenLabs keys, checks a passcode, and caps daily use.</p>
+      </div>
+    </div>
+  </header>
+
+  <section id="architecture" aria-labelledby="arch-h">
+    <p class="eyebrow">1 · Architecture</p>
+    <h2 id="arch-h">Where every piece lives</h2>
+    <p class="prose">Both versions share one front end. Only two things change between them: where the page gets Claude from, and where voices come from. Click any box to see what it does and why it exists.</p>
+    <div class="tabs" role="tablist" aria-label="Version">
+      <button class="tab" role="tab" id="tab-hosted" aria-selected="true" aria-controls="dg-hosted">Hosted (Cloudflare)</button>
+      <button class="tab" role="tab" id="tab-claude" aria-selected="false" aria-controls="dg-claude">claude.ai artifact</button>
+    </div>
+    <div class="diagram-wrap">
+      <div>
+        <div class="diagram" id="dg-hosted" role="tabpanel" aria-labelledby="tab-hosted">
+          <svg viewBox="0 0 960 560" role="img" aria-label="Hosted architecture: the browser talks to a Cloudflare Worker, which holds the secrets and calls the Anthropic API and ElevenLabs.">
+            <defs>
+              <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrowhead" d="M0,0 L10,5 L0,10 z"/></marker>
+            </defs>
+            <rect class="box-zone" x="10" y="20" width="250" height="520" rx="14"/>
+            <text class="zone-label" x="28" y="46">Viewer's browser</text>
+            <rect class="box-zone" x="330" y="20" width="310" height="520" rx="14"/>
+            <text class="zone-label" x="348" y="46">Cloudflare Worker</text>
+            <rect class="box-zone" x="710" y="20" width="240" height="520" rx="14"/>
+            <text class="zone-label" x="728" y="46">Outside services</text>
+
+            <g class="node k-page" tabindex="0" role="button" data-node="index"><rect x="30" y="66" width="210" height="52" rx="10"/><text x="46" y="90">index.html</text><text class="sub" x="46" y="107">layout + styles</text></g>
+            <g class="node k-page" tabindex="0" role="button" data-node="app"><rect x="30" y="132" width="210" height="52" rx="10"/><text x="46" y="156">app.js</text><text class="sub" x="46" y="173">debate engine + UI</text></g>
+            <g class="node k-page" tabindex="0" role="button" data-node="logic"><rect x="30" y="198" width="210" height="52" rx="10"/><text x="46" y="222">logic.js</text><text class="sub" x="46" y="239">prompts + validation</text></g>
+            <g class="node k-page" tabindex="0" role="button" data-node="voice"><rect x="30" y="264" width="210" height="52" rx="10"/><text x="46" y="288">voice.js</text><text class="sub" x="46" y="305">speaking + fallback</text></g>
+            <g class="node k-cf" tabindex="0" role="button" data-node="hostedjs"><rect x="30" y="330" width="210" height="52" rx="10"/><text x="46" y="354">hosted.js</text><text class="sub" x="46" y="371">injected by Worker</text></g>
+            <text class="edge-label" x="30" y="420">Same files on both versions,</text>
+            <text class="edge-label" x="30" y="436">except hosted.js.</text>
+
+            <g class="node k-cf" tabindex="0" role="button" data-node="session"><rect x="350" y="66" width="270" height="52" rx="10"/><text x="366" y="90">/api/session</text><text class="sub" x="366" y="107">passcode → signed cookie</text></g>
+            <g class="node k-cf" tabindex="0" role="button" data-node="sample"><rect x="350" y="132" width="270" height="52" rx="10"/><text x="366" y="156">/api/sample</text><text class="sub" x="366" y="173">Claude pass-through (stream)</text></g>
+            <g class="node k-cf" tabindex="0" role="button" data-node="tts"><rect x="350" y="198" width="270" height="52" rx="10"/><text x="366" y="222">/api/tts · /api/voices</text><text class="sub" x="366" y="239">voice pass-through (MP3)</text></g>
+            <g class="node k-cf" tabindex="0" role="button" data-node="assets"><rect x="350" y="264" width="270" height="52" rx="10"/><text x="366" y="288">Static assets</text><text class="sub" x="366" y="305">serves src/ + injects hosted.js</text></g>
+            <g class="node k-cf" tabindex="0" role="button" data-node="cap"><rect x="350" y="356" width="270" height="52" rx="10"/><text x="366" y="380">DailyCap (Durable Object)</text><text class="sub" x="366" y="397">20 debates / day + backstops</text></g>
+            <g class="node" tabindex="0" role="button" data-node="secrets"><rect x="350" y="440" width="270" height="76" rx="10"/><text x="366" y="464">🔒 Secrets</text><text class="sub" x="366" y="483">ANTHROPIC_API_KEY · ELEVENLABS_API_KEY</text><text class="sub" x="366" y="500">ACCESS_PASSCODE · SESSION_SECRET</text></g>
+
+            <g class="node k-claude" tabindex="0" role="button" data-node="anthropic"><rect x="730" y="132" width="200" height="62" rx="10"/><text x="746" y="157">Anthropic API</text><text class="sub" x="746" y="176">claude-sonnet-5-5</text></g>
+            <g class="node k-el" tabindex="0" role="button" data-node="eleven"><rect x="730" y="214" width="200" height="62" rx="10"/><text x="746" y="239">ElevenLabs</text><text class="sub" x="746" y="258">eleven_flash_v2_5</text></g>
+
+            <path class="edge" d="M240 158 C 290 158, 300 158, 348 158" marker-end="url(#ah)"/>
+            <text class="edge-label" x="262" y="148">HTTPS</text>
+            <path class="edge" d="M240 356 C 300 356, 300 92, 348 92" marker-end="url(#ah)"/>
+            <text class="edge-label" x="262" y="250">+ cookie</text>
+            <path class="edge" d="M240 290 C 300 290, 300 224, 348 224" marker-end="url(#ah)"/>
+            <path class="edge" d="M620 158 L 728 158" marker-end="url(#ah)"/>
+            <text class="edge-label" x="634" y="150">SSE stream</text>
+            <path class="edge" d="M620 224 L 728 240" marker-end="url(#ah)"/>
+            <text class="edge-label" x="634" y="218">MP3 stream</text>
+            <path class="edge" d="M485 184 L 485 354" marker-end="url(#ah)"/>
+            <text class="edge-label" x="492" y="300">count</text>
+            <path class="edge" d="M620 478 C 680 478, 690 200, 728 175" stroke-dasharray="4 4"/>
+            <text class="edge-label" x="644" y="400">keys added</text>
+            <text class="edge-label" x="644" y="414">server-side</text>
+          </svg>
+        </div>
+        <div class="diagram" id="dg-claude" role="tabpanel" aria-labelledby="tab-claude" hidden>
+          <svg viewBox="0 0 960 420" role="img" aria-label="claude.ai architecture: the artifact page calls Claude through claude.ai using the viewer's own account and speaks with browser voices.">
+            <defs>
+              <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrowhead" d="M0,0 L10,5 L0,10 z"/></marker>
+            </defs>
+            <rect class="box-zone" x="10" y="20" width="400" height="380" rx="14"/>
+            <text class="zone-label" x="28" y="46">Artifact page (in claude.ai)</text>
+            <rect class="box-zone" x="480" y="20" width="470" height="380" rx="14"/>
+            <text class="zone-label" x="498" y="46">claude.ai runtime</text>
+
+            <g class="node k-page" tabindex="0" role="button" data-node="index"><rect x="30" y="66" width="170" height="52" rx="10"/><text x="46" y="90">index.html</text><text class="sub" x="46" y="107">layout + styles</text></g>
+            <g class="node k-page" tabindex="0" role="button" data-node="app"><rect x="220" y="66" width="170" height="52" rx="10"/><text x="236" y="90">app.js</text><text class="sub" x="236" y="107">debate engine + UI</text></g>
+            <g class="node k-page" tabindex="0" role="button" data-node="logic"><rect x="30" y="140" width="170" height="52" rx="10"/><text x="46" y="164">logic.js</text><text class="sub" x="46" y="181">prompts + validation</text></g>
+            <g class="node k-page" tabindex="0" role="button" data-node="voice"><rect x="220" y="140" width="170" height="52" rx="10"/><text x="236" y="164">voice.js</text><text class="sub" x="236" y="181">browser voices</text></g>
+            <g class="node" tabindex="0" role="button" data-node="speech"><rect x="220" y="240" width="170" height="62" rx="10"/><text x="236" y="265">speechSynthesis</text><text class="sub" x="236" y="284">built into the browser</text></g>
+
+            <g class="node k-claude" tabindex="0" role="button" data-node="samplecap"><rect x="500" y="66" width="270" height="62" rx="10"/><text x="516" y="91">claude.use("sample")</text><text class="sub" x="516" y="110">runtime capability</text></g>
+            <g class="node k-claude" tabindex="0" role="button" data-node="viewer"><rect x="500" y="200" width="270" height="62" rx="10"/><text x="516" y="225">Claude, as the viewer</text><text class="sub" x="516" y="244">their account, their consent</text></g>
+
+            <path class="edge" d="M390 92 L 498 96" marker-end="url(#ah2)"/>
+            <text class="edge-label" x="404" y="84">stream</text>
+            <path class="edge" d="M635 128 L 635 198" marker-end="url(#ah2)"/>
+            <path class="edge" d="M305 192 L 305 238" marker-end="url(#ah2)"/>
+            <text class="edge-label" x="500" y="300">No server, no keys, no cost to you.</text>
+            <text class="edge-label" x="500" y="318">Each viewer allows the page once.</text>
+          </svg>
+        </div>
+        <p class="hint">Tip: on a phone, scroll the diagram sideways.</p>
+      </div>
+      <aside class="detail" aria-live="polite">
+        <p class="eyebrow">Selected</p>
+        <h3 id="d-title">/api/sample</h3>
+        <p class="where" id="d-where">worker/sample.js</p>
+        <p id="d-what"></p>
+        <p class="why" id="d-why"></p>
+      </aside>
+    </div>
+  </section>
+
+  <section id="lifecycle" aria-labelledby="life-h">
+    <p class="eyebrow">2 · One debate, start to finish</p>
+    <h2 id="life-h">What happens when you press Start</h2>
+    <p class="prose">A debate is nine model calls in a fixed order. None of them remembers the others: Claude has no memory between calls, so the page rebuilds the full context every time.</p>
+    <ol class="steps">
+      <li class="step"><div class="step-body">
+        <h3>Cast the debaters</h3>
+        <p>One call asks Claude for two contrasting characters as JSON: a name, an emoji, a personality and, on the hosted site, a voice from the list of 12. Typed personas keep your words; Claude only names and voices them.</p>
+        <p class="calls">1 call · sample.json · counts toward the daily cap</p>
+        <details class="peek"><summary>Peek at the prompt shape</summary>
+<pre>We are staging a funny debate between two characters on this topic: "Is cereal a soup?"
+Side FOR argues in favor of the topic. Side AGAINST argues against it.
+FOR character: invent one that is funny and appropriate to the topic.
+…
+Respond with JSON only, in exactly this shape:
+{"for":{"name":"...","emoji":"...","personality":"...","voice":"&lt;voice key&gt;"}, …}</pre>
+        </details>
+      </div></li>
+      <li class="step"><div class="step-body">
+        <h3>Six streamed turns</h3>
+        <p>Opening, Rebuttal, Closing; For speaks first each round. Each call carries the persona, the round's goal, the rules (about 120 words, no markdown, stay in character) and every word said so far. Text appears as it is written.</p>
+        <p class="calls">6 calls · sample with onText · Server-Sent Events on the hosted site</p>
+        <details class="peek"><summary>Peek at a rebuttal prompt</summary>
+<pre>You are Captain Grimbeard, a character in a lighthearted debate. Your personality: a grumpy 1800s pirate.
+The debate topic is: "Is cereal a soup?"
+You are arguing FOR the topic; your opponent, Professor Prim, is arguing AGAINST it.
+This is the Rebuttal round. Rebut your opponent: attack their weakest points…
+Respond directly to your opponent's specific points, quoting or paraphrasing what they actually said…
+Debate so far:
+Captain Grimbeard (FOR, Opening): …
+Professor Prim (AGAINST, Opening): …
+Now give your Rebuttal speech as Captain Grimbeard, arguing FOR the topic: in character, at most ~120 words…</pre>
+        </details>
+      </div></li>
+      <li class="step"><div class="step-body">
+        <h3>Speak each turn</h3>
+        <p>With Voice on, the finished turn is sent to ElevenLabs in that debater's voice and played before the next turn starts. If anything fails (credits gone, voice retired, outage), that turn switches to the browser's own voice.</p>
+        <p class="calls">7 clips including the verdict · /api/tts → MP3</p>
+      </div></li>
+      <li class="step"><div class="step-body">
+        <h3>The judge rules</h3>
+        <p>A weary Supreme Court justice reads the whole transcript and returns scores as JSON: logic, persuasion and character, 1 to 10 each. The page checks every number and lets the totals pick the winner, because a model can name a winner that contradicts its own scores.</p>
+        <p class="calls">1 call · sample.json · normalizeVerdict() validates it</p>
+      </div></li>
+    </ol>
+    <div class="growth" aria-label="How the prompt grows each turn">
+      <p class="eyebrow">Why the prompt grows: approximate words sent per call</p>
+      <div class="gbar"><span>Opening · For</span><span class="track"><span class="fill for" style="display:block;width:14%"></span></span><span class="n">~180</span></div>
+      <div class="gbar"><span>Opening · Against</span><span class="track"><span class="fill against" style="display:block;width:24%"></span></span><span class="n">~300</span></div>
+      <div class="gbar"><span>Rebuttal · For</span><span class="track"><span class="fill for" style="display:block;width:35%"></span></span><span class="n">~440</span></div>
+      <div class="gbar"><span>Rebuttal · Against</span><span class="track"><span class="fill against" style="display:block;width:45%"></span></span><span class="n">~560</span></div>
+      <div class="gbar"><span>Closing · For</span><span class="track"><span class="fill for" style="display:block;width:56%"></span></span><span class="n">~700</span></div>
+      <div class="gbar"><span>Closing · Against</span><span class="track"><span class="fill against" style="display:block;width:66%"></span></span><span class="n">~820</span></div>
+      <div class="gbar"><span>Judge</span><span class="track"><span class="fill judge" style="display:block;width:78%"></span></span><span class="n">~980</span></div>
+      <p class="hint">Estimates for ~120-word turns. Open “Under the hood” on any bubble in the app to see the real prompt.</p>
+    </div>
+  </section>
+
+  <section id="lessons" aria-labelledby="lessons-h">
+    <p class="eyebrow">3 · What this taught about Claude</p>
+    <h2 id="lessons-h">Eight capabilities, and where they show up in the code</h2>
+    <div class="lessons">
+      <div class="lesson"><h3>Personas are just instructions</h3><p>There is no special persona feature. A name, a personality line and “stay in character” are enough for Claude to hold a voice across a whole debate. Change one sentence and the debate changes completely.</p><p class="in-code">logic.js · buildTurnPrompt()</p></div>
+      <div class="lesson"><h3>Claude is stateless</h3><p>Each call starts from nothing. Conversation “memory” is the app re-sending the transcript, which is why later turns cost more and why the Under the hood panel shows the prompt getting longer.</p><p class="in-code">app.js · transcript[] passed every turn</p></div>
+      <div class="lesson"><h3>Instructions belong near the end</h3><p>In a long prompt, rules placed only at the top get diluted. The turn prompt repeats the key rules after the transcript, right before Claude writes. A reviewer added this after spotting the risk.</p><p class="in-code">logic.js · closing reminder line</p></div>
+      <div class="lesson"><h3>Streaming makes it feel alive</h3><p>Text arrives in small deltas instead of one block. On the hosted site the Worker relays Anthropic's Server-Sent Events (<code>content_block_delta</code>) to the page as they arrive.</p><p class="in-code">worker/sample.js · src/hosted.js</p></div>
+      <div class="lesson"><h3>Ask for JSON, then check it</h3><p>Claude follows a JSON shape well, but the code still validates every field: scores clamped to 1–10, strings like <code>"8"</code> accepted, unknown voices replaced, garbage rejected with a Retry button.</p><p class="in-code">logic.js · normalizePersonas(), normalizeVerdict()</p></div>
+      <div class="lesson"><h3>AI as a judge needs a rubric</h3><p>The judge gets defined criteria, a scale, a valid example and the rule “higher total wins”. Even so, the code lets the totals decide, because the stated winner and the scores can disagree.</p><p class="in-code">logic.js · buildJudgePrompt()</p></div>
+      <div class="lesson"><h3>Model settings matter</h3><p>The server calls <code>claude-sonnet-5-5</code> with the lowest thinking setting so the 1,024-token budget goes to the speech, sends no temperature (this API version rejects it), and enables server-side fallback for reliability.</p><p class="in-code">worker/sample.js · request body</p></div>
+      <div class="lesson"><h3>Plan for “no”</h3><p>Claude can decline a request, rate limits happen, and viewers can refuse permission. Each case has its own message and recovery path: refused turns are cleared, rate limits offer a retry, permanent refusals stop asking.</p><p class="in-code">app.js · errorCopy(), PERMANENT codes</p></div>
+    </div>
+  </section>
+
+  <section id="decisions" aria-labelledby="dec-h">
+    <p class="eyebrow">4 · Decisions and trade-offs</p>
+    <h2 id="dec-h">Why it is built this way</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Decision</th><th>Why</th><th>Trade-off accepted</th></tr></thead>
+        <tbody>
+          <tr><td>Plain HTML and JavaScript, no framework</td><td>Runs as a claude.ai artifact unchanged; nothing to build or install.</td><td>More manual DOM code than React would need.</td></tr>
+          <tr><td>One front end, two adapters</td><td>app.js asks for a <code>sample</code> object; claude.ai or hosted.js supplies it. Fixes land in both versions at once.</td><td>The adapter must mimic the claude.ai API exactly, including error codes.</td></tr>
+          <tr><td>Keys live only in the Worker</td><td>Anything in a web page can be read by its visitors. The server adds keys on the way out.</td><td>Requires hosting a server instead of a static page.</td></tr>
+          <tr><td>Passcode plus signed cookie</td><td>Stops strangers spending your credits, without user accounts.</td><td>Anyone with the passcode can use it; change it to revoke.</td></tr>
+          <tr><td>Daily cap in a Durable Object</td><td>A single counter that can't be raced: 20 debates a day, plus call backstops if a tampered page skips the count.</td><td>The limit is shared by everyone using the site.</td></tr>
+          <tr><td>Sonnet 5.5, not Opus</td><td>Fast and capable enough for 120-word speeches; cheaper per debate.</td><td>Slightly less nuanced arguments than the largest model.</td></tr>
+          <tr><td>ElevenLabs Flash v2.5</td><td>Lowest latency and half the credit cost per character.</td><td>Less expressive than ElevenLabs' top models.</td></tr>
+          <tr><td>Browser voices as fallback</td><td>Free voices retire on December 31 and credits run out; debates should never go silent.</td><td>Fallback voices sound robotic.</td></tr>
+          <tr><td>All text set with <code>textContent</code></td><td>Model output is untrusted. A turn containing HTML shows as text instead of running.</td><td>No rich formatting in speeches (which the prompt forbids anyway).</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="build" aria-labelledby="build-h">
+    <p class="eyebrow">5 · How it was built</p>
+    <h2 id="build-h">A small team of models, with review gates</h2>
+    <p class="prose">The build used the <code>delegated-build</code> skill: one lead plans and verifies, cheaper models do focused work, and every task is reviewed by a fresh agent before it is pushed. Each builder wrote tests first and watched them fail before writing code.</p>
+    <div class="team">
+      <div class="role"><span class="model">Opus · lead</span><h3>Plan and verify</h3><p>Wrote the specs and plan, briefed each agent, re-ran every test suite before pushing.</p></div>
+      <div class="role"><span class="model">Sonnet · builders</span><h3>Write the code</h3><p>One task each, tests first, with a short report back. Never pushed their own work.</p></div>
+      <div class="role"><span class="model">Haiku · researchers</span><h3>Look things up</h3><p>Read ElevenLabs' docs and found that the default voices retire on Dec 31.</p></div>
+      <div class="role"><span class="model">Opus · reviewers</span><h3>Gate each task</h3><p>Checked against the plan, hunted for bugs, fixed them with a test per fix.</p></div>
+    </div>
+    <div class="tally">
+      <div><strong>9</strong><span>tasks (T1–T9)</span></div>
+      <div><strong>205</strong><span>automated tests</span></div>
+      <div><strong>30+</strong><span>bugs caught in review</span></div>
+      <div><strong>0</strong><span>unreviewed pushes</span></div>
+    </div>
+    <ol class="timeline">
+      <li><span class="t">T1</span><div><strong>Prompts and validation.</strong> <span class="caught">Caught: “smile” became the emoji “s”; a capitalised “For” winner was ignored.</span></div></li>
+      <li><span class="t">T2</span><div><strong>Page and streaming debate.</strong> <span class="caught">Caught: the setup form never hid during a debate; Stop could break after a quick restart.</span></div></li>
+      <li><span class="t">T3</span><div><strong>Judge scorecard and retries.</strong> <span class="caught">Caught: typed personas were all named “Debater For / Against”.</span></div></li>
+      <li><span class="t">T4</span><div><strong>Whole-app review.</strong> <span class="caught">Caught: the same topic replayed a cached debate; the judge could crown the lower total.</span></div></li>
+      <li><span class="t">T5</span><div><strong>Browser voices.</strong> <span class="caught">Caught: iPhones would stay silent because speech didn't start inside a tap.</span></div></li>
+      <li><span class="t">T6</span><div><strong>Worker core.</strong> <span class="caught">Caught: refusals passed off as finished turns; a memory leak in the login limiter.</span></div></li>
+      <li><span class="t">T7</span><div><strong>Passcode screen and adapter.</strong> <span class="caught">Caught: debates double-counted; the daily cap could be bypassed; garbled emoji.</span></div></li>
+      <li><span class="t">T8</span><div><strong>ElevenLabs voices.</strong> <span class="caught">Caught: a busy moment was mistaken for running out of credits.</span></div></li>
+      <li><span class="t">T9</span><div><strong>Security and deploy review.</strong> <span class="caught">Caught: a missing key used up daily slots; unclear setup errors.</span></div></li>
+    </ol>
+  </section>
+
+  <section id="files" aria-labelledby="files-h">
+    <p class="eyebrow">6 · Map of the repo</p>
+    <h2 id="files-h">Where to look for what</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Path</th><th>What it holds</th><th>Open it to learn</th></tr></thead>
+        <tbody>
+          <tr><td class="mono">src/logic.js</td><td>Every prompt, plus validation of what comes back</td><td>Prompt engineering in practice</td></tr>
+          <tr><td class="mono">src/app.js</td><td>The debate loop, streaming, retries, Stop</td><td>Orchestrating many model calls</td></tr>
+          <tr><td class="mono">src/voice.js</td><td>Speaking turns, ElevenLabs or browser fallback</td><td>Graceful degradation</td></tr>
+          <tr><td class="mono">src/hosted.js</td><td>Hosted-only adapter and passcode screen</td><td>Parsing a Server-Sent Events stream</td></tr>
+          <tr><td class="mono">worker/sample.js</td><td>Calls the Anthropic Messages API</td><td>Raw API requests and streaming</td></tr>
+          <tr><td class="mono">worker/session.js</td><td>Passcode check and signed cookies</td><td>Basic web security</td></tr>
+          <tr><td class="mono">worker/cap.js</td><td>The daily limit counter</td><td>Durable Objects</td></tr>
+          <tr><td class="mono">worker/tts.js</td><td>Calls ElevenLabs</td><td>Streaming audio through a server</td></tr>
+          <tr><td class="mono">wrangler.jsonc</td><td>Cloudflare deploy settings (no secrets)</td><td>Infrastructure as config</td></tr>
+          <tr><td class="mono">docs/</td><td>Specs, plan, research notes, this guide</td><td>How the work was planned</td></tr>
+          <tr><td class="mono">tests/</td><td>205 tests, including real-browser tests</td><td>Testing AI apps with stand-ins</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="try" aria-labelledby="try-h">
+    <p class="eyebrow">7 · Learn by changing it</p>
+    <h2 id="try-h">Five experiments to try</h2>
+    <ul class="exercises">
+      <li><span class="level">Easy · no code</span><h3>Watch the context grow</h3><p>Run a debate, then open “Under the hood” on the first and last bubbles. Compare what Claude was sent.</p></li>
+      <li><span class="level">Easy · one line</span><h3>Recast the judge</h3><p>In <code>buildJudgePrompt()</code>, swap “a weary Supreme Court justice” for “an over-excited game show host”. Notice how the reasoning changes but the scores stay sensible.</p></li>
+      <li><span class="level">Medium</span><h3>Add a fourth round</h3><p>Add “Cross-examination” to <code>ROUNDS</code> with a goal in <code>ROUND_GOALS</code>. Watch which tests fail; they show you every place that assumed three rounds.</p></li>
+      <li><span class="level">Medium</span><h3>Tune the cost guard</h3><p>Change <code>DAILY_CAP</code> in <code>wrangler.jsonc</code>, push, and see Cloudflare redeploy automatically.</p></li>
+      <li><span class="level">Stretch</span><h3>Let the audience vote</h3><p>Ask Claude Code to add a vote button before the verdict and compare the crowd with the judge. Start with the brainstorming step, as this project did.</p></li>
+    </ul>
+  </section>
+
+  <section id="glossary" aria-labelledby="gloss-h">
+    <p class="eyebrow">8 · Glossary</p>
+    <h2 id="gloss-h">Terms used above</h2>
+    <dl class="gloss">
+      <dt>Artifact</dt><dd>A web page hosted by claude.ai. It can be granted runtime capabilities, such as calling Claude as the viewer.</dd>
+      <dt>Messages API</dt><dd>Anthropic's API for sending a conversation to Claude and getting a reply, used by the hosted Worker.</dd>
+      <dt>Streaming (SSE)</dt><dd>Server-Sent Events: the reply arrives as many small events instead of one response.</dd>
+      <dt>Stateless</dt><dd>Each model call knows only what is in that call. History must be re-sent.</dd>
+      <dt>Structured output</dt><dd>Asking the model to answer in a fixed format such as JSON, so code can read it.</dd>
+      <dt>LLM-as-judge</dt><dd>Using a model to evaluate other model output against a rubric.</dd>
+      <dt>Cloudflare Worker</dt><dd>A small server program that runs on Cloudflare's network with no machine to manage.</dd>
+      <dt>Durable Object</dt><dd>A Cloudflare object with its own storage that handles one request at a time, ideal for counters.</dd>
+      <dt>Secret</dt><dd>An encrypted setting only the server can read, such as an API key.</dd>
+      <dt>Spec, plan, review</dt><dd>The build process: agree what to build, break it into tasks, and have a fresh agent check each one.</dd>
+    </dl>
+  </section>
+</main>
+
+<script>
+(function () {
+  var D = {
+    index: ['index.html', 'src/index.html', 'The page skeleton: setup form, arena, styles for light and dark themes. Loads logic.js, voice.js and app.js.', 'Kept free of hosted-only code so the exact same file works as a claude.ai artifact.'],
+    app: ['app.js', 'src/app.js', 'Runs a debate: casts personas, loops through six turns, streams text into bubbles, calls the judge, handles Stop, Retry and errors.', 'Every call goes through one sample() interface, so it never needs to know which version it is running in.'],
+    logic: ['logic.js', 'src/logic.js', 'Builds every prompt (personas, turns, judge) and validates every answer (names, emoji, voices, scores).', 'Pure functions with no page access, so they are easy to unit-test. This is where the prompt engineering lives.'],
+    voice: ['voice.js', 'src/voice.js', 'Speaks each finished turn. Uses ElevenLabs through the Worker when available, otherwise the browser’s built-in voices.', 'Never rejects and never hangs: it resolves on end, error, cancel or a safety timeout so a debate can’t freeze.'],
+    hostedjs: ['hosted.js', 'src/hosted.js (hosted site only)', 'Supplies the sample() object over /api/sample, parses the event stream, plays ElevenLabs audio and shows the passcode screen.', 'The Worker injects it into the page, so the claude.ai version never loads it.'],
+    session: ['/api/session', 'worker/session.js', 'Checks the passcode with a constant-time compare and sets a signed, HttpOnly cookie valid for 30 days. Slows down repeated wrong guesses.', 'Simple protection without user accounts. Changing ACCESS_PASSCODE or SESSION_SECRET signs everyone out.'],
+    sample: ['/api/sample', 'worker/sample.js', 'Adds your Anthropic key, calls the Messages API with streaming, and relays text deltas to the page. Maps API errors to codes the page already understands.', 'The key never reaches the browser. Input size and roles are validated before anything is sent.'],
+    tts: ['/api/tts · /api/voices', 'worker/tts.js, worker/voices.js', 'Turns a speech into MP3 with ElevenLabs. Only voices from a curated list of 12 are allowed; voice IDs stay on the server.', 'Credit errors switch the page to browser voices for the rest of the visit; brief outages fall back for one turn only.'],
+    assets: ['Static assets', 'wrangler.jsonc → assets: ./src', 'Serves the page files from src/ and inserts the hosted.js script tag into index.html on the way out.', 'Only src/ is public. Tests, docs and Worker code are never served.'],
+    cap: ['DailyCap (Durable Object)', 'worker/cap.js', 'Counts debates per UTC day and blocks the 21st. Separate counters cap total Claude calls (×10) and voice clips (×16).', 'A Durable Object handles one request at a time, so two debates can’t slip past the limit together.'],
+    secrets: ['Secrets', 'Cloudflare → Settings → Variables and Secrets', 'Four encrypted values only the Worker can read. If a required one is missing, the site refuses to run and says which.', 'Fails closed: a misconfigured site never grants access or leaks a key.'],
+    anthropic: ['Anthropic API', 'claude-sonnet-5-5', 'Writes the personas, the six speeches and the verdict. Called with streaming, minimal thinking and server-side fallback.', 'Sonnet balances quality, speed and cost for short speeches.'],
+    eleven: ['ElevenLabs', 'eleven_flash_v2_5 · mp3_22050_32', 'Generates character voices. Claude picks one of 12 premade voices per debater; Bill is always the judge.', 'Free plan covers about five voiced debates a month, and these voices retire on Dec 31, hence the fallback.'],
+    speech: ['speechSynthesis', 'Web Speech API', 'The browser’s built-in text-to-speech. Free and offline, quality depends on the device.', 'Speech is started inside a tap so phones allow later turns to play.'],
+    samplecap: ['claude.use("sample")', 'claude.ai runtime capability', 'Lets an artifact page call Claude with streaming, as the person viewing it. Declared at publish time; each viewer approves once.', 'No API key or server needed, and you pay nothing when friends use it.'],
+    viewer: ['Claude, as the viewer', 'the viewer’s claude.ai account', 'Every debate on the artifact runs on the account of whoever opened the link.', 'Someone without Claude access sees the page but can’t start a debate.']
+  };
+  var title = document.getElementById('d-title'), where = document.getElementById('d-where'), what = document.getElementById('d-what'), why = document.getElementById('d-why');
+  function show(key) {
+    var d = D[key]; if (!d) return;
+    title.textContent = d[0]; where.textContent = d[1]; what.textContent = d[2]; why.textContent = 'Why: ' + d[3];
+    document.querySelectorAll('.node').forEach(function (n) { n.classList.toggle('sel', n.getAttribute('data-node') === key); });
+  }
+  document.querySelectorAll('.node').forEach(function (n) {
+    n.setAttribute('aria-label', (D[n.getAttribute('data-node')] || [''])[0]);
+    n.addEventListener('click', function () { show(n.getAttribute('data-node')); });
+    n.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); show(n.getAttribute('data-node')); } });
+  });
+  var tabs = [['tab-hosted', 'dg-hosted', 'sample'], ['tab-claude', 'dg-claude', 'samplecap']];
+  tabs.forEach(function (t) {
+    document.getElementById(t[0]).addEventListener('click', function () {
+      tabs.forEach(function (o) {
+        var on = o[0] === t[0];
+        document.getElementById(o[0]).setAttribute('aria-selected', on ? 'true' : 'false');
+        document.getElementById(o[1]).hidden = !on;
+      });
+      show(t[2]);
+    });
+  });
+  show('sample');
+})();
+</script>
